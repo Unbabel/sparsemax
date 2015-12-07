@@ -1,8 +1,8 @@
 import array
 import numpy as np
 import scipy.sparse as sp
-from sklearn.utils import check_random_state
-from sklearn.preprocessing import MultiLabelBinarizer
+#from sklearn.utils import check_random_state
+#from sklearn.preprocessing import MultiLabelBinarizer
 import pdb
 
 def make_multilabel_classification(n_samples=100, n_features=20, n_classes=5,

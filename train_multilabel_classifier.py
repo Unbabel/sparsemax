@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from multilabel_dataset import make_multilabel_classification
 from multilabel_dataset_reader import read_multilabel_dataset
 #from sklearn.datasets import make_multilabel_classification
+import time
 import sys
 import pdb
 
@@ -154,6 +155,7 @@ weights = np.zeros((num_words, num_classes))
 t = 0
 for epoch in xrange(num_epochs):
 
+    tic = time.time()
     if loss_function == 'sparsemax':
         num_settings = len(sparsemax_scales)
     elif loss_function == 'softmax':
@@ -240,7 +242,10 @@ for epoch in xrange(num_epochs):
 
     loss /= num_documents_train
     loss += 0.5 * regularization_constant * np.linalg.norm(weights.flatten())**2
-    print 'Epoch %d, loss: %f' % (epoch+1, loss)
+
+    elapsed_time = time.time() - tic
+
+    print 'Epoch %d, loss: %f, time: %f' % (epoch+1, loss, elapsed_time)
 
 
     # Test the classifier on dev/test data.
@@ -255,8 +260,11 @@ for epoch in xrange(num_epochs):
         print '%s: %f, acc train: %f' % \
             (hyperparameter_name, hyperparameter_values[k], acc_train[k])
 
+    tic = time.time()
     classify_dataset(filepath_dev, weights, loss_function, \
                      hyperparameter_name, \
                      hyperparameter_values)
+    elapsed_time = time.time() - tic
+    print 'Time to test: %f' % elapsed_time
 
 
