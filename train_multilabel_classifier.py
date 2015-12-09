@@ -7,6 +7,27 @@ import time
 import sys
 import pdb
 
+class Weights:
+    def __init__(self, num_words, num_classes):
+        self.w = np.zeros((num_words, num_classes))
+        self.scaling = 1.
+
+    def get(self, i):
+        return self.w[i, :] * self.scaling
+
+    def toarray(self):
+        return self.w * self.scaling
+
+    def scale(self, scaling_factor):
+        self.scaling *= scaling_factor
+
+    def add(self, i, value):
+        self.w[i, :] += value / self.scaling
+
+    def canonicalize(self):
+        self.scale(self.scaling)
+        self.scaling = 1.
+
 def compute_support(probs):
     ind = probs.nonzero()[0]
     supp =  np.zeros_like(probs)
@@ -151,7 +172,16 @@ num_words = num_features
 num_classes = num_labels
 num_documents_train = len(X_train)
 
-weights = np.zeros((num_words, num_classes))
+if loss_function == 'softmax':
+    hyperparameter_name = 'softmax_thres'
+    hyperparameter_values = softmax_thresholds
+else:
+    hyperparameter_name = 'sparsemax_scale'
+    hyperparameter_values = sparsemax_scales
+
+
+#weights = np.zeros((num_words, num_classes))
+weights = Weights(num_words, num_classes)
 t = 0
 for epoch in xrange(num_epochs):
 
@@ -170,7 +200,8 @@ for epoch in xrange(num_epochs):
         x = X_train[i]
         scores = np.zeros(num_classes)
         for fid, fval in x.iteritems():
-            scores += fval * weights[fid, :]
+            scores += fval * weights.get(fid)
+            #scores += fval * weights[fid, :]
 
         gold_labels = compute_support(y)
 
@@ -227,21 +258,27 @@ for epoch in xrange(num_epochs):
             union_labels[k] += sum(compute_support(gold_labels + predicted_labels))
 
         assert eta * regularization_constant < 1. #, pdb.set_trace()
-        weights *= (1. - eta*regularization_constant)
+        weights.scale(1. - eta*regularization_constant)
+        #weights *= (1. - eta*regularization_constant)
 
         for fid, fval in grad.iteritems():
-            weights[fid] -= eta * fval
+            weights.add(fid, -eta * fval)
+            #weights[fid] -= eta * fval
 
         t += 1
 
         #print y, probs
+
+    weights.canonicalize()
+    w = weights.toarray()
+    # w = weights
 
     acc_train = np.zeros(num_settings)
     for k in xrange(len(acc_train)):
         acc_train[k] = matched_labels[k] / union_labels[k]
 
     loss /= num_documents_train
-    loss += 0.5 * regularization_constant * np.linalg.norm(weights.flatten())**2
+    loss += 0.5 * regularization_constant * np.linalg.norm(w.flatten())**2
 
     elapsed_time = time.time() - tic
 
@@ -249,22 +286,22 @@ for epoch in xrange(num_epochs):
 
 
     # Test the classifier on dev/test data.
-    if loss_function == 'softmax':
-        hyperparameter_name = 'softmax_thres'
-        hyperparameter_values = softmax_thresholds
-    else:
-        hyperparameter_name = 'sparsemax_scale'
-        hyperparameter_values = sparsemax_scales
-
     for k in xrange(len(hyperparameter_values)):
         print '%s: %f, acc train: %f' % \
             (hyperparameter_name, hyperparameter_values[k], acc_train[k])
 
     tic = time.time()
-    classify_dataset(filepath_dev, weights, loss_function, \
+    classify_dataset(filepath_dev, w, loss_function, \
                      hyperparameter_name, \
                      hyperparameter_values)
     elapsed_time = time.time() - tic
     print 'Time to test: %f' % elapsed_time
 
+print 'Running on the test set...'
+tic = time.time()
+classify_dataset(filepath_test, w, loss_function, \
+                 hyperparameter_name, \
+                 hyperparameter_values)
+elapsed_time = time.time() - tic
+print 'Time to test: %f' % elapsed_time
 
