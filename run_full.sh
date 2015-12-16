@@ -1,6 +1,6 @@
-for eta in 10 100 1000
+for eta in 10 100 1000 1
 do
-    for regularizer in 0.0000001 0.000001 0.00001
+    for regularizer in 0.0000001 0.000001 0.00001 0.0001 0.001
     do
         for mode in softmax sparsemax
         do
@@ -9,7 +9,7 @@ do
                 /mnt/data/corpora/multilabel/rcv1v2_full/rcv1_topics_train_0.svm \
                 /mnt/data/corpora/multilabel/rcv1v2_full/rcv1_topics_train_1.svm \
                 /mnt/data/corpora/multilabel/rcv1v2_full/rcv1_topics_test.svm >& \
-                log_full6_${mode}_eta-${eta}_regularizer-${regularizer}.txt
+                log_full_macro_${mode}_eta-${eta}_regularizer-${regularizer}.txt
         done
     done
 done
