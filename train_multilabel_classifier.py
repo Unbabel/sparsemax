@@ -174,10 +174,10 @@ def classify_dataset(filepath, weights, classifier_type, \
         macro_P_dev = np.mean(Pl_dev[k, :])
         macro_R_dev = np.mean(Rl_dev[k, :])
         macro_F1_dev = 2*macro_P_dev*macro_R_dev / (macro_P_dev + macro_R_dev)
-        macro_F1_dev_wrong = np.mean(F1l_dev[k, :])
-        print '%s: %f, acc_dev: %f, hamming_dev: %f, P_dev: %f, R_dev: %f, F1_dev: %f, macro_F1_dev: %f, macro_F1_dev_correct: %f' % \
+        #macro_F1_dev_wrong = np.mean(F1l_dev[k, :])
+        print '%s: %f, acc_dev: %f, hamming_dev: %f, P_dev: %f, R_dev: %f, F1_dev: %f, macro_P_dev: %f, macro_R_dev: %f, macro_F1_dev: %f' % \
             (hyperparameter_name, hyperparameter_values[k], \
-             acc_dev[k], hamming_dev[k], P_dev[k], R_dev[k], F1_dev[k], macro_F1_dev_wrong, macro_F1_dev)
+             acc_dev[k], hamming_dev[k], P_dev[k], R_dev[k], F1_dev[k], macro_P_dev, macro_R_dev, macro_F1_dev)
 
         if print_all_labels:
             for l in xrange(num_labels): 
@@ -325,11 +325,11 @@ for epoch in xrange(num_epochs):
         acc_train[k] = matched_labels[k] / union_labels[k]
 
     loss /= num_documents_train
-    loss += 0.5 * regularization_constant * np.linalg.norm(w.flatten())**2
+    reg = 0.5 * regularization_constant * np.linalg.norm(w.flatten())**2
 
     elapsed_time = time.time() - tic
 
-    print 'Epoch %d, loss: %f, time: %f' % (epoch+1, loss, elapsed_time)
+    print 'Epoch %d, reg: %f, loss: %f, reg+loss: %f, time: %f' % (epoch+1, reg, loss, reg+loss, elapsed_time)
 
 
     # Test the classifier on dev/test data.
