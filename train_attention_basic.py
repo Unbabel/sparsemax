@@ -97,11 +97,13 @@ y_dev = y[num_training_examples:(num_training_examples+num_dev_examples)]
 #assert num_classes == 2, pdb.set_trace()
 assert input_size == 2, pdb.set_trace()
 
-#ind_negative = np.nonzero(y_train == 0)[0]
-#ind_positive = np.nonzero(y_train == 1)[0]
+plot = True
+if plot:
+    ind_negative = np.nonzero(y_train == 0)[0]
+    ind_positive = np.nonzero(y_train == 1)[0]
 
-#plt.plot(X_train[ind_positive, 0], X_train[ind_positive, 1], 'bs')
-#plt.plot(X_train[ind_negative, 0], X_train[ind_negative, 1], 'ro')
+    plt.plot(X_train[ind_positive, 0], X_train[ind_positive, 1], 'bs')
+    plt.plot(X_train[ind_negative, 0], X_train[ind_negative, 1], 'ro')
 
 
 print 'Training...'
@@ -123,10 +125,11 @@ for n in xrange(num_training_examples):
 
     X_train_new[n, :] = average_rep
 
-#plt.plot(X_train_new[ind_positive, 0], X_train_new[ind_positive, 1], 'gs')
-#plt.plot(X_train_new[ind_negative, 0], X_train_new[ind_negative, 1], 'co')
+if plot:
+    plt.plot(X_train_new[ind_positive, 0], X_train_new[ind_positive, 1], 'gs')
+    plt.plot(X_train_new[ind_negative, 0], X_train_new[ind_negative, 1], 'co')
 
-#plt.show()
+    plt.show()
 
 X_dev_new = np.zeros_like(X_dev)
 width = 1.

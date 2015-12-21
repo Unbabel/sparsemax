@@ -43,8 +43,8 @@ class SoftmaxGrad(gof.Op):
     def __eq__(self, other):
         return type(self) == type(other)
 
-    def __hash__(self):
-        return tensor.hashtype(self)
+    #def __hash__(self):
+    #    return tensor.hashtype(self)
 
     def __str__(self):
         return self.__class__.__name__
@@ -137,8 +137,8 @@ class SparsemaxGrad(gof.Op):
     def __eq__(self, other):
         return type(self) == type(other)
 
-    def __hash__(self):
-        return tensor.hashtype(self)
+    #def __hash__(self):
+    #    return tensor.hashtype(self)
 
     def __str__(self):
         return self.__class__.__name__
