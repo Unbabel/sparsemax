@@ -56,8 +56,8 @@ class ffnn(object):
             l = self.activation_function(T.dot(self.Wel, emb).T + self.bl)
             #l = self.activation_function(T.dot(self.Wxh, emb).T + self.bh)
             v = T.dot(l, h)
-            #p = T.nnet.softmax(v)
-            p = sparsemax_theano.sparsemax(v)
+            p = T.nnet.softmax(v)
+            #p = sparsemax_theano.sparsemax(v)
             xt = T.dot(emb, p.T)
             ht = self.activation_function(T.dot(self.Wxht, xt) + self.bht)
             #ht = self.activation_function(T.dot(self.Wxh, xt) + self.bh)
@@ -166,30 +166,48 @@ class ffnn(object):
                 f.write(' '.join([str(W[i]) for i in xrange(num_elems)]) + '\n')
             f.close()
 
-def read_dataset(dataset_file, num_features=-1):
+def read_dataset(dataset_file, input_alphabet={}, output_alphabet={}):
+    if len(output_alphabet) == 0:
+        add_features = True
+    else:
+        add_features = False
     f = open(dataset_file)
     X = []
     y = []
     for line in f:
         line = line.rstrip(' \n')
         fields = line.split(' ')
-        label = int(fields[0])
-        if label == -1:
-            label = 2
+        label = fields[-1]
+        if label not in output_alphabet:
+            if add_features:
+                lid = len(output_alphabet)
+                output_alphabet[label] = lid
+            else:
+                assert False, pdb.set_trace()
+        else:
+            lid = output_alphabet[label]
         x = {}
         #pdb.set_trace()
-        for field in fields[1:]:
+        for field in fields[:-1]:
             key_value = field.split(':')
             assert len(key_value) == 2, pdb.set_trace()
-            key = int(key_value[0])
+            key = key_value[0]
             value = float(key_value[1])
-            if num_features < 0 or key < num_features:
-                assert key not in x, pdb.set_trace()
-                x[key] = value
+            if '_' in key:
+                continue # Ignore bigrams.
+            if key not in input_alphabet:
+                if not add_features:
+                    continue
+                fid = len(input_alphabet)
+                input_alphabet[key] = fid
+            else:
+                fid = input_alphabet[key]
+            assert fid not in x, pdb.set_trace()
+            x[fid] = 1.0 #value
         X.append(x)
-        y.append(label)
+        y.append(lid)
     f.close()
-    return X, y
+    return X, y, input_alphabet, output_alphabet
 
 
 def convert_data_to_shared_arrays(input_sequences, output_labels):
@@ -232,8 +250,9 @@ if __name__ == '__main__':
     #input_sequences, output_sequences, input_alphabet, output_alphabet = \
     #    read_dataset(train_file, cutoff=1)
 
-    input_sequences, output_labels = read_dataset(train_file)
+    input_sequences, output_labels, input_alphabet, output_alphabet = read_dataset(train_file)
 
+    #pdb.set_trace()
     num_labels = len(set(output_labels))
     num_features = 1+max([max(seq.keys()) for seq in input_sequences])
     print 'Number of labels: ', num_labels
@@ -247,15 +266,16 @@ if __name__ == '__main__':
     #    read_dataset(dev_file, input_alphabet, output_alphabet, \
     #                 locked_alphabets=True)
 
-    input_sequences_dev, output_labels_dev = read_dataset(dev_file, num_features)
+    input_sequences_dev, output_labels_dev, _, _ = read_dataset(dev_file, input_alphabet, output_alphabet)
 
     # Load the test dataset.
     #input_sequences_test, output_sequences_test, _, _ = \
     #    read_dataset(test_file, input_alphabet, output_alphabet, \
     #                 locked_alphabets=True)
 
-    input_sequences_test, output_labels_test = read_dataset(test_file, num_features)
+    input_sequences_test, output_labels_test, _, _ = read_dataset(test_file, input_alphabet, output_alphabet)
 
+    #pdb.set_trace()
 
     print 'Converting data to shared arrays...'
     X, y, positions = \
