@@ -53,11 +53,16 @@ class ffnn(object):
 
         #attention = True #False
         if self.attention:
+            # l is a num_words-by-num_hidden matrix.
             l = self.activation_function(T.dot(self.Wel, emb).T + self.bl)
-            #l = self.activation_function(T.dot(self.Wxh, emb).T + self.bh)
-            v = T.dot(l, T.dot(self.Whl, h))
-            p = T.nnet.softmax(v)
-            #p = sparsemax_theano.sparsemax(v)
+            #v = T.dot(l, T.dot(self.Whl, h))
+
+            # m is a num_words-by-num_hidden matrix.
+            m = self.activation_function(T.dot(self.Whm, h) + T.dot(self.Wlm, l.T).T + self.bm)
+            v = T.dot(self.Wmp, m.T)
+
+            #p = T.nnet.softmax(v)
+            p = sparsemax_theano.sparsemax(v)
             xt = T.dot(emb, p.T)
             ht = self.activation_function(T.dot(self.Wxht, xt) + self.bht)
             #ht = self.activation_function(T.dot(self.Wxh, xt) + self.bh)
@@ -112,9 +117,20 @@ class ffnn(object):
                                            dtype=theano.config.floatX))
 
         if self.attention:
-            self.Whl  = theano.shared(np.zeros((self.hidden_size,
+            self.Whm  = theano.shared(np.zeros((self.hidden_size,
                                                 self.hidden_size)).
                                       astype(theano.config.floatX))
+            self.Wlm  = theano.shared(np.zeros((self.hidden_size,
+                                                self.hidden_size)).
+                                      astype(theano.config.floatX))
+            self.bm  = theano.shared(np.zeros(self.hidden_size,
+                                              dtype=theano.config.floatX))
+            self.Wmp  = theano.shared(np.zeros((self.hidden_size,
+                                                self.hidden_size)).
+                                      astype(theano.config.floatX))
+            #self.Whl  = theano.shared(np.zeros((self.hidden_size,
+            #                                    self.hidden_size)).
+            #                          astype(theano.config.floatX))
             self.Wel  = theano.shared(np.zeros((self.hidden_size,
                                                 self.embedding_size)).
                                       astype(theano.config.floatX))
@@ -130,8 +146,8 @@ class ffnn(object):
         self.names = ['embeddings', 'Wxh', 'Why', 'bh', 'by']
 
         if self.attention:
-            self.params += [ self.Whl, self.Wel, self.bl, self.Wxht, self.bht ]
-            self.names += ['Whl', 'Wel', 'bl', 'Wxht', 'bht']
+            self.params += [ self.Whm, self.Wlm, self.bm, self.Wmp, self.Wel, self.bl, self.Wxht, self.bht ]
+            self.names += ['Whm', 'Wlm', 'bm', 'Wmp', 'Wel', 'bl', 'Wxht', 'bht']
 
     def initialize_parameters(self):
         for param in self.params:
