@@ -259,9 +259,12 @@ class rnn_gru(rnn):
 def read_dataset(dataset_file, input_alphabet={'__START__': 0, '__UNK__': 1}, \
                  output_alphabet={}, \
                  locked_alphabets=False, cutoff=1):
+    wid_unknown = input_alphabet['__UNK__']
+    wid_start = input_alphabet['__START__']
     input_sequences = []
     output_labels = []
     word_freq = [0 for word in input_alphabet]
+    num_initial_words = len(input_alphabet)
     words = []
     f = open(dataset_file)
     for line in f:
@@ -284,7 +287,7 @@ def read_dataset(dataset_file, input_alphabet={'__START__': 0, '__UNK__': 1}, \
                 input_alphabet[word] = wid
                 word_freq.append(1)
             else:
-                wid = 1 # Unknown symbol.
+                wid = wid_unknown # Unknown symbol.
             w.append(wid)
         if label in output_alphabet:
             tid = output_alphabet[label]
@@ -303,7 +306,7 @@ def read_dataset(dataset_file, input_alphabet={'__START__': 0, '__UNK__': 1}, \
             words[wid] = word
         new_input_alphabet = {}
         for wid in xrange(len(word_freq)):
-            if wid == 0 or wid == 1 or word_freq[wid] > cutoff:
+            if wid < num_initial_words or word_freq[wid] > cutoff:
                 new_wid = len(new_input_alphabet)
                 new_input_alphabet[words[wid]] = new_wid
         input_alphabet = new_input_alphabet
@@ -313,11 +316,29 @@ def read_dataset(dataset_file, input_alphabet={'__START__': 0, '__UNK__': 1}, \
                 if word in new_input_alphabet:
                     input_sequence[t] = new_input_alphabet[word]
                 else:
-                    input_sequence[t] = 1 # Unknown symbol.
+                    input_sequence[t] = wid_unknown # Unknown symbol.
         print 'Number of words after cutoff: %d' % len(new_input_alphabet)
 
     return input_sequences, output_labels, input_alphabet, output_alphabet 
 
+
+def load_word_vectors(word_vector_file):
+    word_vectors = {}
+    f = open(word_vector_file)
+    # Skip first line.
+    f.readline()
+    for line in f:
+        line = line.rstrip(' \n')
+        fields = line.split(' ')
+        word = fields[0]
+        vector = np.array([float(val) for val in fields[1:]])
+        assert word not in word_vectors, pdb.set_trace()
+        word_vectors[word] = vector
+    f.close()
+
+    print 'Loaded %d word vectors.' % len(word_vectors)
+    return word_vectors
+    
 
 def convert_data_to_shared_arrays(input_sequences, output_labels):
     num_sentences = len(output_labels)
@@ -345,19 +366,34 @@ def convert_data_to_shared_arrays(input_sequences, output_labels):
 
 
 if __name__ == '__main__':
-    train_file = sys.argv[1]
-    dev_file = sys.argv[2]
-    test_file = sys.argv[3]
-    num_hidden_units = int(sys.argv[4])
-    num_epochs = int(sys.argv[5])
-    learning_rate = float(sys.argv[6])
+    word_vector_file = sys.argv[1]
+    train_file = sys.argv[2]
+    dev_file = sys.argv[3]
+    test_file = sys.argv[4]
+    num_hidden_units = int(sys.argv[5])
+    num_epochs = int(sys.argv[6])
+    learning_rate = float(sys.argv[7])
 
-    embedding_dimension = 64
+    embedding_dimension = 300 # 64
     window_size = 3 #1
+
+    # Load the word vectors.
+    word_vectors = load_word_vectors(word_vector_file)
+    input_alphabet = {}
+    fixed_embeddings = np.zeros((embedding_dimension, len(word_vectors)))
+    for word in word_vectors:
+        wid = len(input_alphabet)
+        assert word not in input_alphabet, pdb.set_trace()
+        input_alphabet[word] = wid
+        fixed_embeddings[:, wid] = word_vectors[word]
+    for word in ['__START__', '__UNK__']:
+        wid = len(input_alphabet)
+        assert word not in input_alphabet, pdb.set_trace()
+        input_alphabet[word] = wid
 
     # Load the training dataset.
     input_sequences, output_sequences, input_alphabet, output_alphabet = \
-        read_dataset(train_file, cutoff=1)
+        read_dataset(train_file, input_alphabet=input_alphabet, cutoff=1)
 
     print 'Number of labels: ', len(output_alphabet)
     print 'Number of features: ', len(input_alphabet)

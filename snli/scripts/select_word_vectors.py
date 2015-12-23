@@ -1,0 +1,57 @@
+import sys
+import pdb
+
+word_vectors_filepath = sys.argv[1]
+data_filepath = sys.argv[2]
+
+f = open(word_vectors_filepath)
+# Skip first line.
+f.readline()
+index = 0
+word_indices = {}
+for line in f:
+    line = line.rstrip('\n')
+    fields = line.split(' ')
+    word = fields[0]
+    assert word not in word_indices, pdb.set_trace()
+    word_indices[word] = index
+    index += 1
+f.close()
+
+print >> sys.stderr, 'Number of word vectors: %d' % index
+active_indices = [False] * index
+
+f = open(data_filepath)
+data_words = set()
+for line in f:
+    line = line.rstrip('\n')
+    fields = line.split('\t')
+    assert len(fields) == 3, pdb.set_trace()
+    words = ' '.join([fields[1], fields[2]]).split(' ')
+    for word in words:
+        if word not in data_words:
+            data_words.add(word)
+f.close()
+
+print >> sys.stderr, 'Number of data words: %d' % len(data_words)
+
+num_unknown_words = 0
+for word in data_words:
+    if word in word_indices:
+        index = word_indices[word]
+        active_indices[index] = True
+    else:
+        num_unknown_words += 1
+
+print >> sys.stderr, 'Number of unknown data words: %d' % num_unknown_words
+
+# Dump the new word vector file.
+f = open(word_vectors_filepath)
+print f.readline().rstrip('\n')
+index = 0
+for line in f:
+    line = line.rstrip('\n')
+    if active_indices[index]:
+        print line
+    index += 1
+f.close()
