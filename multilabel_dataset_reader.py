@@ -2,7 +2,7 @@ import numpy as np
 import sys
 import pdb
 
-def read_multilabel_dataset(filepath, num_labels=-1, num_features=-1, sparse=False):
+def read_multilabel_dataset(filepath, num_labels=-1, num_features=-1, sparse=False, add_bias=False):
     f = open(filepath)
     all_labels = []
     all_features = []
@@ -12,12 +12,16 @@ def read_multilabel_dataset(filepath, num_labels=-1, num_features=-1, sparse=Fal
         #if fields[0] == '70': pdb.set_trace()
         labels = [int(l) for l in fields[0].split(',')]
         features = {}
+        if add_bias:
+            features[1] = 1.
         for field in fields[1:]:
             name_value = field.split(':')
             assert len(name_value) == 2, pdb.set_trace()
             fid = int(name_value[0])
             fval = float(name_value[1])
             assert fid > 0, pdb.set_trace() # 0 is reserved for UNK.
+            if add_bias:
+                fid += 1 # 1 is reserved for bias feature.
             assert fid not in features, pdb.set_trace()
             if num_features >= 0 and fid >= num_features:
                 fid = 0 # UNK.

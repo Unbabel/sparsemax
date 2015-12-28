@@ -10,8 +10,8 @@ from collections import OrderedDict
 
 
 class rnn(object):
-    def __init__(self, hidden_size, num_labels, num_features, embedding_size,
-                 activation='logistic'):
+    def __init__(self, hidden_size, num_labels, num_features, embedding_size, \
+                 fixed_embeddings, activation='logistic'):
         '''
         hidden_size :: dimension of the hidden layer
         num_labels :: number of labels
@@ -23,6 +23,7 @@ class rnn(object):
         self.num_labels = num_labels
         self.num_features = num_features
         self.embedding_size = embedding_size
+        self.original_embedding_size = fixed_embeddings.shape[0]
         self.bidirectional = True
 
         if activation == 'logistic':
@@ -35,12 +36,42 @@ class rnn(object):
         self.create_parameters()
         self.initialize_parameters()
 
+        # Copy the fixed embeddings to self.emb.
+        num_fixed_embeddings = fixed_embeddings.shape[1]
+        self.num_fixed_embeddings = num_fixed_embeddings
+        E = self.emb.get_value()
+        E[:, :num_fixed_embeddings] = fixed_embeddings.astype(theano.config.floatX)
+        self.emb.set_value(E)
+        #T.set_subtensor(self.emb[:, :num_fixed_embeddings], \
+        #                fixed_embeddings.astype(theano.config.floatX))
+
+
         # As many elements as words in the sentence.
         self.idxs = T.ivector()
         idxs = self.idxs
 
-        emb = self.emb[:, idxs]
-        x = emb.T
+        #positions_nonupd = (idxs < num_fixed_embeddings).nonzero()[0]
+        #positions_upd = (idxs >= num_fixed_embeddings).nonzero()[0]
+        self.positions_nonupd = T.ivector()
+        self.positions_upd = T.ivector()
+        positions_nonupd = self.positions_nonupd
+        positions_upd = self.positions_upd
+        idxs_nonupd = idxs[positions_nonupd]
+        idxs_upd = idxs[positions_upd]
+
+        emb_nonupd = self.emb[:, idxs_nonupd]
+        emb_upd = self.emb[:, idxs_upd]
+        positions = T.concatenate([positions_nonupd, positions_upd])
+        emb = T.concatenate([emb_nonupd, emb_upd], axis=1)
+        emb = T.set_subtensor(emb[:, positions], emb)
+
+        #emb = self.emb[:, idxs]
+        #x = emb.T
+        x = T.dot(self.Wx, emb).T
+
+        #self.positions_to_update = T.ivector()
+        #positions_to_update = self.positions_to_update
+        #emb_to_update = emb[:, positions_to_update]
 
         self.y = T.iscalar('y')  # label.
         y = self.y
@@ -84,28 +115,68 @@ class rnn(object):
 
         params_to_update = self.params[1:]
         sentence_gradients = T.grad(self.sentence_nll, params_to_update)
-        sentence_gradient_emb = T.grad(self.sentence_nll, emb)
-        sentence_update_emb = [(self.emb, T.inc_subtensor(emb, -lr*sentence_gradient_emb))]
+        sentence_gradient_emb = T.grad(self.sentence_nll, emb_upd)
+        sentence_update_emb = [(self.emb, T.inc_subtensor(emb_upd, -lr*sentence_gradient_emb))]
         self.sentence_updates = OrderedDict((p, p - lr*g)
                                        for p, g in
                                        zip(params_to_update, sentence_gradients))
         self.sentence_updates.update(sentence_update_emb)
 
-        self.classify = theano.function(inputs=[idxs], outputs=[y_pred, p_y_given_x_sentence])
+        self.classify = theano.function(inputs=[idxs, positions_upd, positions_nonupd], outputs=[y_pred, p_y_given_x_sentence])
+        #self.classify = theano.function(inputs=[idxs], outputs=[y_pred, p_y_given_x_sentence])
 
 
     def define_train(self, X, y, positions):
+        positions_v = positions.get_value()
+        X_v = X.get_value()
+        X_upd_list = []
+        X_nonupd_list = []
+        start_end_positions_upd = np.zeros_like(positions_v)
+        start_end_positions_nonupd = np.zeros_like(positions_v)
+        for j in xrange(len(positions_v)):
+            start = positions_v[j,0]
+            end = positions_v[j,1]
+            positions_to_update_list = []
+            start_end_positions_upd[j,0] = len(X_upd_list)
+            start_end_positions_nonupd[j,0] = len(X_nonupd_list)
+            for k in xrange(start, end):
+                index = X_v[k]
+                if index >= self.num_fixed_embeddings:
+                    X_upd_list.append(k - start)
+                else:
+                    X_nonupd_list.append(k - start)
+            start_end_positions_upd[j,1] = len(X_upd_list)
+            start_end_positions_nonupd[j,1] = len(X_nonupd_list)
+
+        X_upd = np.array(X_upd_list, dtype='int32')
+        X_nonupd = np.array(X_nonupd_list, dtype='int32')
+        th_X_upd  = theano.shared(X_upd.astype('int32'), borrow=True)
+        th_X_nonupd  = theano.shared(X_nonupd.astype('int32'), borrow=True)
+        th_positions_upd = \
+            theano.shared(start_end_positions_upd.astype('int32'), borrow=True)
+        th_positions_nonupd = \
+            theano.shared(start_end_positions_nonupd.astype('int32'), borrow=True)
+
         i = T.lscalar()
-        givens = {self.idxs: X[positions[i,0]:positions[i,1]],
-                  self.y  : y[i]}
+        givens = {self.idxs: X[positions[i,0]:positions[i,1]], \
+                  self.positions_upd: \
+                    th_X_upd[th_positions_upd[i,0]: \
+                             th_positions_upd[i,1]], \
+                  self.positions_nonupd: \
+                    th_X_nonupd[th_positions_nonupd[i,0]: \
+                                th_positions_nonupd[i,1]], \
+                  self.y: y[i]}
 
         self.train = theano.function(inputs=[i, self.lr],
                                      outputs=[self.sentence_nll, self.num_mistakes],
                                      updates=self.sentence_updates,
-                                     givens=givens)
+                                     givens=givens,
+                                     on_unused_input='warn')
 
     def create_parameters(self):
-        self.emb = theano.shared(np.zeros((self.embedding_size, self.num_features)).
+        self.emb = theano.shared(np.zeros((self.original_embedding_size, self.num_features)).
+                                 astype(theano.config.floatX))
+        self.Wx = theano.shared(np.zeros((self.embedding_size, self.original_embedding_size)).
                                  astype(theano.config.floatX))
         self.Wxh  = theano.shared(np.zeros((self.hidden_size,
                                             self.embedding_size)).
@@ -122,8 +193,8 @@ class rnn(object):
                                           dtype=theano.config.floatX))
 
         # bundle
-        self.params = [ self.emb, self.Wxh, self.Whh, self.Why, self.bh, self.by, self.h0 ]
-        self.names = ['embeddings', 'Wxh', 'Whh', 'Why', 'bh', 'by', 'h0']
+        self.params = [ self.emb, self.Wx, self.Wxh, self.Whh, self.Why, self.bh, self.by, self.h0 ]
+        self.names = ['embeddings', 'Wx', 'Wxh', 'Whh', 'Why', 'bh', 'by', 'h0']
 
         if self.bidirectional:
             self.Wxl  = theano.shared(np.zeros((self.hidden_size,
@@ -168,6 +239,14 @@ class rnn(object):
         l_t = self.activation_function(T.dot(self.Wxl, x_t) + T.dot(self.Wll, l_tp1) + self.bl)
         return l_t
 
+    def recurrence2(self, u_t, h_tm1):
+        h_t = self.activation_function(u_t + T.dot(self.Whh, h_tm1) + self.bh)
+        return h_t
+
+    def recurrence_right_to_left2(self, u_t, l_tp1):
+        l_t = self.activation_function(u_t + T.dot(self.Wll, l_tp1) + self.bl)
+        return l_t
+
     def save(self, folder):
         if not os.path.exists(folder):
             os.mkdir(folder)
@@ -187,8 +266,8 @@ class rnn(object):
 
 
 class rnn_gru(rnn):
-    def __init__(self, hidden_size, num_labels, num_features, embedding_size,
-                 activation='logistic'):
+    def __init__(self, hidden_size, num_labels, num_features, embedding_size, \
+                 fixed_embeddings, activation='logistic'):
         '''
         hidden_size :: dimension of the hidden layer
         num_labels :: number of labels
@@ -198,7 +277,7 @@ class rnn_gru(rnn):
         activation :: logistic or tanh
         '''
         rnn.__init__(self, hidden_size, num_labels, num_features,
-                     embedding_size, activation=activation)
+                     embedding_size, fixed_embeddings, activation=activation)
 
     def create_parameters(self):
         rnn.create_parameters(self)
@@ -255,6 +334,19 @@ class rnn_gru(rnn):
         l_t = (1-z_t) * l_tp1 + z_t * lu_t
         return l_t
 
+    def recurrence2(self, u_t, uz_t, ur_t, h_tm1):
+        z_t = T.nnet.sigmoid(uz_t + T.dot(self.Whz, h_tm1) + self.bz)
+        r_t = T.nnet.sigmoid(ur_t + T.dot(self.Whr, h_tm1) + self.br)
+        hu_t = self.activation_function(u_t + T.dot(self.Whh, r_t * h_tm1) + self.bh)
+        h_t = (1-z_t) * h_tm1 + z_t * hu_t
+        return h_t
+
+    def recurrence_right_to_left2(self, u_t, uz_t, ur_t, l_tp1):
+        z_t = T.nnet.sigmoid(uz_t + T.dot(self.Wlz, l_tp1) + self.bz_r)
+        r_t = T.nnet.sigmoid(ur_t + T.dot(self.Wlr, l_tp1) + self.br_r)
+        lu_t = self.activation_function(u_t + T.dot(self.Wll, r_t * l_tp1) + self.bl)
+        l_t = (1-z_t) * l_tp1 + z_t * lu_t
+        return l_t
 
 def read_dataset(dataset_file, input_alphabet={'__START__': 0, '__UNK__': 1}, \
                  output_alphabet={}, \
@@ -374,13 +466,15 @@ if __name__ == '__main__':
     num_epochs = int(sys.argv[6])
     learning_rate = float(sys.argv[7])
 
-    embedding_dimension = 300 # 64
+    original_embedding_dimension = 300 # 64
+    embedding_dimension = num_hidden_units
     window_size = 3 #1
 
     # Load the word vectors.
     word_vectors = load_word_vectors(word_vector_file)
+    num_fixed_embeddings = len(word_vectors)
     input_alphabet = {}
-    fixed_embeddings = np.zeros((embedding_dimension, len(word_vectors)))
+    fixed_embeddings = np.zeros((original_embedding_dimension, num_fixed_embeddings))
     for word in word_vectors:
         wid = len(input_alphabet)
         assert word not in input_alphabet, pdb.set_trace()
@@ -428,6 +522,7 @@ if __name__ == '__main__':
               len(output_alphabet),
               len(input_alphabet),
               embedding_dimension,
+              fixed_embeddings,
               activation='tanh')
 
 
@@ -460,8 +555,9 @@ if __name__ == '__main__':
                 end = pos.get_value()[j,1]
                 xx = inputs.get_value()[start:end]
                 yy = outputs.get_value()[j]
-                output_label_pred, p_y_given_x_sentence = rnn.classify(xx)
-
+                output_label_pred, p_y_given_x_sentence = \
+                    rnn.classify(xx, np.array([], dtype='int32'), \
+                                 np.arange(len(xx)).astype('int32'))
                 acc += float(np.sum(yy == output_label_pred))
                 num_sentences += 1
             acc /= num_sentences
