@@ -2,15 +2,22 @@ import numpy as np
 import sys
 import pdb
 
-def read_multilabel_dataset(filepath, num_labels=-1, num_features=-1, sparse=False, add_bias=False):
+def read_multilabel_dataset(filepath, num_labels=-1, num_features=-1, \
+                            has_label_probabilities=False, sparse=False, add_bias=False):
     f = open(filepath)
     all_labels = []
+    all_label_probabilities = []
     all_features = []
     for line in f:
         line = line.rstrip('\n')
         fields = line.split()
         #if fields[0] == '70': pdb.set_trace()
-        labels = [int(l) for l in fields[0].split(',')]
+        if has_label_probabilities:
+            labels, label_probabilities = zip(*[l.split(':') for l in fields[0].split(',')])
+            labels = [int(l) for l in labels]
+            label_probabilities = [float(val) for val in label_probabilities]
+        else:
+            labels = [int(l) for l in fields[0].split(',')]
         features = {}
         if add_bias:
             features[1] = 1.
@@ -28,6 +35,8 @@ def read_multilabel_dataset(filepath, num_labels=-1, num_features=-1, sparse=Fal
             features[fid] = fval
         #pdb.set_trace()
         all_labels.append(labels)
+        if has_label_probabilities:
+            all_label_probabilities.append(label_probabilities)
         all_features.append(features)
     f.close()
 
@@ -51,9 +60,15 @@ def read_multilabel_dataset(filepath, num_labels=-1, num_features=-1, sparse=Fal
         assert num_labels == 1+max(label_set), pdb.set_trace()
 
     Y = np.zeros((num_examples, num_labels), dtype=float)
-    for i, labels in enumerate(all_labels):
-        for label in labels:
-            Y[i, label] = 1
+    if has_label_probabilities:
+        for i, (labels, label_probabilities) in \
+            enumerate(zip(all_labels, all_label_probabilities)):
+            for label, val in zip(labels, label_probabilities):
+                Y[i, label] = val
+    else:
+        for i, labels in enumerate(all_labels):
+            for label in labels:
+                Y[i, label] = 1
     if sparse:
         X_sparse = all_features
         return X_sparse, Y, num_features

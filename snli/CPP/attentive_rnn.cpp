@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
   int num_epochs = atoi(argv[5]);
   double learning_rate = atof(argv[6]);
 
-  int embedding_dimension = 64;
+  int embedding_dimension = 300; //64;
   int word_cutoff = 1;
 
   Dictionary dictionary;
