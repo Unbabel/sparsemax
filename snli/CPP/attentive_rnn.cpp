@@ -9,6 +9,41 @@
 
 const int kMaxAffixSize = 4;
 
+void LoadWordVectors(const std::string &word_vector_file,
+		     std::unordered_map<std::string, std::vector<double> > *word_vectors) {
+  // Read word vectors.
+  std::cout << "Loading word vectors..." << std::endl;
+  std::ifstream is;
+  is.open(word_vector_file.c_str(), std::ifstream::in);
+  assert(is.good());
+  int num_dimensions = -1;
+  std::string line;
+  if (is.is_open()) {
+    getline(is, line); // Skip first line.
+    while (!is.eof()) {
+      getline(is, line);
+      if (line == "") break;
+      std::vector<std::string> fields;
+      StringSplit(line, " ", &fields);
+      if (num_dimensions < 0) {
+	num_dimensions = fields.size()-1;
+	std::cout << "Number of dimensions: " << num_dimensions << std::endl;
+      } else {
+	assert(num_dimensions == fields.size()-1);
+      }
+      std::string word = fields[0];
+      std::vector<double> word_vector(num_dimensions, 0.0);
+      for (int i = 0; i < num_dimensions; ++i) {
+	word_vector[i] = atof(fields[1+i].c_str());
+      }
+      assert(word_vectors->find(word) == word_vectors->end());
+      (*word_vectors)[word] = word_vector;
+    }
+  }
+  is.close();
+  std::cout << "Loaded " << word_vectors->size() << " word vectors." << std::endl;
+}
+
 void ReadDataset(const std::string &dataset_file,
                  bool locked_alphabets,
                  int cutoff,
@@ -51,7 +86,7 @@ void ReadDataset(const std::string &dataset_file,
 
   // Load dictionary if necessary.
   if (!locked_alphabets) {
-    dictionary->CreateFromDataset(dataset, kMaxAffixSize, cutoff, 0);
+    dictionary->AddWordsFromDataset(dataset, cutoff, 0);
   }
 
   // Create numeric dataset.
@@ -75,14 +110,33 @@ int main(int argc, char** argv) {
   std::string train_file = argv[1];
   std::string dev_file = argv[2];
   std::string test_file = argv[3];
-  int num_hidden_units = atoi(argv[4]);
-  int num_epochs = atoi(argv[5]);
-  double learning_rate = atof(argv[6]);
+  std::string word_vector_file = argv[4];
+  int num_hidden_units = atoi(argv[5]);
+  int num_epochs = atoi(argv[6]);
+  double learning_rate = atof(argv[7]);
 
   int embedding_dimension = 300; //64;
   int word_cutoff = 1;
 
   Dictionary dictionary;
+  dictionary.Clear();
+  dictionary.set_max_affix_size(kMaxAffixSize);
+
+  std::unordered_map<std::string, std::vector<double> > word_vectors;
+  LoadWordVectors(word_vector_file, &word_vectors);
+  int num_fixed_embeddings = word_vectors.size();
+  Matrix fixed_embeddings = Matrix::Zero(embedding_dimension,
+					 num_fixed_embeddings);
+  std::vector<int> word_ids; 
+  for (auto it = word_vectors.begin(); it != word_vectors.end(); ++it) {
+    int wid = dictionary.AddWord(it->first);
+    const std::vector<double> &word_vector = it->second;
+    word_ids.push_back(wid);
+    for (int k = 0; k < word_vector.size(); ++k) {
+      fixed_embeddings(k, wid) = static_cast<float>(word_vector[k]);
+    }
+  }
+
   std::vector<std::vector<Input> > input_sequences;
   std::vector<int> output_labels;
   ReadDataset(train_file, false, word_cutoff, &dictionary,
@@ -106,6 +160,7 @@ int main(int argc, char** argv) {
   RNN rnn(&dictionary, embedding_dimension,
           num_hidden_units, dictionary.GetNumLabels());
   rnn.InitializeParameters();
+  rnn.SetFixedEmbeddings(fixed_embeddings, word_ids);
   rnn.Train(input_sequences, output_labels,
             input_sequences_dev, output_labels_dev,
             input_sequences_test, output_labels_test,

@@ -24,11 +24,17 @@ class Sentence {
 class Dictionary {
  public:
   void Clear() {
-    max_affix_size_ = 0;
     word_alphabet_.clear();
     prefix_alphabet_.clear();
     suffix_alphabet_.clear();
     label_alphabet_.clear();
+  }
+
+  int AddWord(const std::string &word) {
+    assert(word_alphabet_.find(word) == word_alphabet_.end());
+    int wid = word_alphabet_.size();
+    word_alphabet_[word] = wid;
+    return wid;
   }
 
   int max_affix_size() const { return max_affix_size_; }
@@ -45,21 +51,21 @@ class Dictionary {
     std::unordered_map<std::string, int>::const_iterator it =
       word_alphabet_.find(word);
     if (it != word_alphabet_.end()) return it->second;
-    return 0; // Unknown symbol.
+    return word_alphabet_.find("__UNK__")->second; // Unknown symbol.
   }
 
   int GetPrefixId(const std::string &prefix) const {
     std::unordered_map<std::string, int>::const_iterator it =
       prefix_alphabet_.find(prefix);
     if (it != prefix_alphabet_.end()) return it->second;
-    return 0; // Unknown symbol.
+    return prefix_alphabet_.find("__UNK__")->second; // Unknown symbol.
   }
 
   int GetSuffixId(const std::string &suffix) const {
     std::unordered_map<std::string, int>::const_iterator it =
       suffix_alphabet_.find(suffix);
     if (it != suffix_alphabet_.end()) return it->second;
-    return 0; // Unknown symbol.
+    return suffix_alphabet_.find("__UNK__")->second; // Unknown symbol.
   }
 
   int GetLabelId(const std::string &label) const {
@@ -69,24 +75,43 @@ class Dictionary {
     assert(false); // Cannot be unknown symbol.
   }
 
-  void CreateFromDataset(const std::vector<Sentence*> &dataset,
-                         int max_affix_size,
-                         int word_cutoff,
-                         int affix_cutoff) {
-    // Clear dictionaries.
-    Clear();
-    set_max_affix_size(max_affix_size);
-
+  void AddWordsFromDataset(const std::vector<Sentence*> &dataset,
+			   int word_cutoff,
+			   int affix_cutoff) {
     // Temporary dictionaries.
-    std::unordered_map<std::string, int> word_alphabet;
-    std::unordered_map<std::string, int> prefix_alphabet;
-    std::unordered_map<std::string, int> suffix_alphabet;
+    std::unordered_map<std::string, int> word_alphabet = word_alphabet_;
+    std::unordered_map<std::string, int> prefix_alphabet = prefix_alphabet_;
+    std::unordered_map<std::string, int> suffix_alphabet = suffix_alphabet_;
+
+    Clear();
 
     // Zero ID for the unknown word.
+    int wid_unknown = -1;
+    int pid_unknown = -1;
+    int sid_unknown = -1;
     std::string unknown_symbol = "__UNK__";
-    word_alphabet[unknown_symbol] = 0;
-    prefix_alphabet[unknown_symbol] = 0;
-    suffix_alphabet[unknown_symbol] = 0;
+    if (word_alphabet.find(unknown_symbol) != word_alphabet.end()) {
+      wid_unknown = word_alphabet[unknown_symbol];
+    } else {
+      wid_unknown = word_alphabet.size();
+      word_alphabet[unknown_symbol] = wid_unknown;
+    }
+    if (prefix_alphabet.find(unknown_symbol) != prefix_alphabet.end()) {
+      pid_unknown = prefix_alphabet[unknown_symbol];
+    } else {
+      pid_unknown = prefix_alphabet.size();
+      prefix_alphabet[unknown_symbol] = pid_unknown;
+    }
+    if (suffix_alphabet.find(unknown_symbol) != suffix_alphabet.end()) {
+      sid_unknown = suffix_alphabet[unknown_symbol];
+    } else {
+      sid_unknown = suffix_alphabet.size();
+      suffix_alphabet[unknown_symbol] = sid_unknown;
+    }
+
+    int num_initial_words = word_alphabet.size();
+    int num_initial_prefixes = prefix_alphabet.size();
+    int num_initial_suffixes = suffix_alphabet.size();
 
     std::vector<int> word_frequencies(word_alphabet.size(), 0);
     std::vector<int> prefix_frequencies(prefix_alphabet.size(), 0);
@@ -110,7 +135,7 @@ class Dictionary {
           word_frequencies.push_back(1);
         }
 
-        for (int k = 1; k <= max_affix_size; ++k) {
+        for (int k = 1; k <= max_affix_size(); ++k) {
           std::string prefix = word.substr(0, k);
           it = prefix_alphabet.find(prefix);
           if (it != prefix_alphabet.end()) {
@@ -123,7 +148,7 @@ class Dictionary {
           }
         }
 
-        for (int k = 1; k <= max_affix_size; ++k) {
+        for (int k = 1; k <= max_affix_size(); ++k) {
           int start = word.length() - k;
           if (start < 0) start = 0;
           std::string suffix = word.substr(start, k);
@@ -160,7 +185,7 @@ class Dictionary {
       words[it->second] = it->first;
     }
     for (int wid = 0; wid < word_frequencies.size(); ++wid) {
-      if (wid == 0 || word_frequencies[wid] > word_cutoff) {
+      if (wid < num_initial_words || word_frequencies[wid] > word_cutoff) {
         int new_wid = word_alphabet_.size();
         word_alphabet_[words[wid]] = new_wid;
       }
@@ -170,7 +195,7 @@ class Dictionary {
       prefixes[it->second] = it->first;
     }
     for (int pid = 0; pid < prefix_frequencies.size(); ++pid) {
-      if (pid == 0 || prefix_frequencies[pid] > affix_cutoff) {
+      if (pid < num_initial_prefixes || prefix_frequencies[pid] > affix_cutoff) {
         int new_pid = prefix_alphabet_.size();
         prefix_alphabet_[prefixes[pid]] = new_pid;
       }
@@ -180,7 +205,7 @@ class Dictionary {
       suffixes[it->second] = it->first;
     }
     for (int sid = 0; sid < suffix_frequencies.size(); ++sid) {
-      if (sid == 0 || suffix_frequencies[sid] > affix_cutoff) {
+      if (sid < num_initial_suffixes || suffix_frequencies[sid] > affix_cutoff) {
         int new_sid = suffix_alphabet_.size();
         suffix_alphabet_[suffixes[sid]] = new_sid;
       }
