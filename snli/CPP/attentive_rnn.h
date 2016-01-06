@@ -8,290 +8,7 @@
 #include "utils.h"
 #include "nn_utils.h"
 #include "snli_data.h"
-
-class LookupLayer {
- public:
-  LookupLayer(Dictionary *dictionary, int embedding_dimension) : 
-      dictionary_(dictionary) {
-    embedding_dimension_ = embedding_dimension;
-    updatable_.assign(dictionary->GetNumWords(), true);
-  }
-
-  virtual ~LookupLayer() {}
-
-  int embedding_dimension() { return embedding_dimension_; }
-
-  void CollectAllParameters(std::vector<Matrix*> *weights,
-                            std::vector<Vector*> *biases,
-                            std::vector<std::string> *weight_names,
-                            std::vector<std::string> *bias_names) {
-    E_ = Matrix::Zero(embedding_dimension_, dictionary_->GetNumWords());
-
-    weights->push_back(&E_);
-    weight_names->push_back("embeddings");
-  }
-
-  void SetFixedEmbeddings(const Matrix &fixed_embeddings,
-			  const std::vector<int> &word_ids) {
-    for (int i = 0; i < fixed_embeddings.cols(); i++) {
-      int wid = word_ids[i];
-      E_.col(wid) = fixed_embeddings.col(i);
-      updatable_[wid] = false;
-    }
-  }
-
-  void RunForward(const std::vector<Input> &input_sequence,
-		  Matrix *x) {
-    x->setZero(embedding_dimension_, input_sequence.size());
-    for (int t = 0; t < input_sequence.size(); ++t) {
-      int wid = input_sequence[t].wid();
-      assert(wid >= 0 && wid < E_.cols());
-      x->col(t) = E_.col(wid);
-    }
-  }
-
-  void RunBackward(const std::vector<Input> &input_sequence,
-		   const Matrix &dX,
-		   double learning_rate) {
-    // Update word embeddings.
-    for (int t = 0; t < input_sequence.size(); ++t) {
-      int wid = input_sequence[t].wid();
-      if (!updatable_[wid]) continue;
-      E_.col(wid) -= learning_rate * dX.col(t);
-    }
-  }
-
- public:
-  int embedding_dimension_;
-  Dictionary *dictionary_;
-  Matrix E_;
-  std::vector<bool> updatable_;
-};
-
-class LinearLayer {
- public:
-  LinearLayer(int input_size, int output_size) { 
-    input_size_ = input_size;
-    output_size_ = output_size;
-  }
-
-  virtual ~LinearLayer() {}
-
-  int input_size() const { return input_size_; }
-  int output_size() const { return output_size_; }
-
-  void CollectAllParameters(std::vector<Matrix*> *weights,
-                            std::vector<Vector*> *biases,
-                            std::vector<std::string> *weight_names,
-                            std::vector<std::string> *bias_names) {
-    Wxy_ = Matrix::Zero(output_size_, input_size_);
-    by_ = Vector::Zero(output_size_);
-
-    weights->push_back(&Wxy_);
-    weight_names->push_back("linear_weights");
-
-    biases->push_back(&by_);
-    bias_names->push_back("linear_bias");
-  }
-
-  void RunForward(const Matrix &x, Matrix *y) {
-    //int length = x.rows();
-    //y->setZero(output_size_, length);
-    x_ = x;
-    *y = (Wxy_ * x).colwise() + by_; 
-  }
-
-  void RunBackward(const Matrix &dy,
-		   double learning_rate,
-		   Matrix *dx) {
-    *dx = Wxy_.transpose() * dy;
-    Matrix dWxy = dy * x_.transpose();
-    Vector dby = dy.rowwise().sum();
-
-    // Update.
-    Wxy_ -= learning_rate * dWxy;
-    by_ -= learning_rate * dby;
-  }
-
- protected:
-  int input_size_;
-  int output_size_;
-  Matrix Wxy_;
-  Vector by_;
-
-  Matrix x_;
-};
-
-
-class SoftmaxOutputLayer {
- public:
-  SoftmaxOutputLayer() {}
-  SoftmaxOutputLayer(int hidden_size,
-		     int output_size) {
-    hidden_size_ = hidden_size;
-    output_size_ = output_size;
-  }
-  virtual ~SoftmaxOutputLayer() {}
-
-  void CollectAllParameters(std::vector<Matrix*> *weights,
-			    std::vector<Vector*> *biases,
-			    std::vector<std::string> *weight_names,
-			    std::vector<std::string> *bias_names) {
-    Why_ = Matrix::Zero(output_size_, hidden_size_);
-    by_ = Vector::Zero(output_size_);
-
-    weights->push_back(&Why_);
-    biases->push_back(&by_);
-
-    weight_names->push_back("Why");
-    bias_names->push_back("by");
-  }
-
-  const Vector &GetProbabilities() { return p_; }
- 
-  void RunForward(const Vector &h) {
-    h_ = h;
-    y_ = Why_ * h_ + by_;
-    double logsum = LogSumExp(y_);
-    p_ = (y_.array() - logsum).exp();
-  }
-
-  void RunBackward(int output_label,
-		   double learning_rate,
-		   Vector *dh) {
-    Matrix dWhy = Matrix::Zero(Why_.rows(), Why_.cols());
-    Vector dby = Vector::Zero(Why_.rows());
-    Vector dy = p_;
-    dy[output_label] -= 1.0; // Backprop into y (softmax grad).
-    dWhy += dy * h_.transpose();
-    dby += dy;
-    *dh = Why_.transpose() * dy; // Backprop into h.
-
-    Why_ -= learning_rate * dWhy;
-    by_ -= learning_rate * dby;
-  }
-
- protected:
-  int hidden_size_;
-  int output_size_;
-
-  Matrix Why_;
-  Vector by_;
-
-  Vector h_;
-  Vector y_;
-  Vector p_;
-};
-
-
-class RNNLayer {
- public:
-  RNNLayer() {}
-  RNNLayer(int input_size,
-	   int hidden_size) {
-    activation_function_ = ActivationFunctions::LOGISTIC;
-    input_size_ = input_size;
-    hidden_size_ = hidden_size;
-    use_hidden_start_ = true;
-  }
-  virtual ~RNNLayer() {}
-
-  virtual void CollectAllParameters(std::vector<Matrix*> *weights,
-                                    std::vector<Vector*> *biases,
-                                    std::vector<std::string> *weight_names,
-                                    std::vector<std::string> *bias_names) {
-    Wxh_ = Matrix::Zero(hidden_size_, input_size_);
-    Whh_ = Matrix::Zero(hidden_size_, hidden_size_);
-    bh_ = Vector::Zero(hidden_size_);
-    if (use_hidden_start_) {
-      h0_ = Vector::Zero(hidden_size_);
-    }
-
-    weights->push_back(&Wxh_);
-    weights->push_back(&Whh_);
-
-    biases->push_back(&bh_);
-    if (use_hidden_start_) {
-      biases->push_back(&h0_); // Not really a bias, but it goes here.
-    }
-
-    weight_names->push_back("Wxh");
-    weight_names->push_back("Whh");
-
-    bias_names->push_back("bh");
-    if (use_hidden_start_) {
-      bias_names->push_back("h0");
-    }
-  }
-
-  virtual void RunForward(const Matrix &x, Matrix *y) {
-    x_ = x;
-    int length = x_.cols();
-    h_.setZero(hidden_size_, length);
-    Vector hprev = Vector::Zero(h_.rows());
-    if (use_hidden_start_) hprev = h0_;
-    for (int t = 0; t < length; ++t) {
-      Matrix result;
-      EvaluateActivation(activation_function_,
-                         Wxh_ * x_.col(t) + bh_ + Whh_ * hprev,
-                         &result);
-      h_.col(t) = result;
-      hprev = h_.col(t);
-    }
-
-    *y = h_;
-  }
-
-  virtual void RunBackward(const Matrix &dy,
-			   double learning_rate,
-			   Matrix *dx) {
-    int length = dy.cols();
-    Matrix dWhh = Matrix::Zero(Whh_.rows(), Whh_.cols());
-    Matrix dWxh = Matrix::Zero(Wxh_.rows(), Wxh_.cols());
-    Vector dbh = Vector::Zero(Whh_.rows());
-    Vector dhnext = Vector::Zero(Whh_.rows());
-
-    dx->setZero(input_size_, length);
-    for (int t = length - 1; t >= 0; --t) {
-      Vector dh = dy.col(t) + dhnext; // Backprop into h.
-      Matrix dhraw;
-      DerivateActivation(activation_function_, h_.col(t), &dhraw);
-      dhraw = dhraw.array() * dh.array();
-
-      dWxh += dhraw * x_.col(t).transpose();
-      dbh += dhraw;
-      if (t > 0) {
-        dWhh += dhraw * h_.col(t-1).transpose();
-      }
-      dhnext.noalias() = Whh_.transpose() * dhraw;
-
-      dx->col(t) = Wxh_.transpose() * dhraw; // Backprop into x.
-    }
-
-    Wxh_ -= learning_rate * dWxh;
-    bh_ -= learning_rate * dbh;
-    Whh_ -= learning_rate * dWhh;
-
-    if (use_hidden_start_) {
-      h0_ -= learning_rate * dhnext;
-    }
-  }
-
- protected:
-  int activation_function_;
-  int hidden_size_;
-  int input_size_;
-  bool use_hidden_start_;
-
-  Matrix Wxh_;
-  Matrix Whh_;
-  Vector bh_;
-  Vector h0_;
-
-  Matrix x_;
-  Matrix h_;
-};
-
+#include "layer.h"
 
 class RNN {
  public:
@@ -301,7 +18,8 @@ class RNN {
       int hidden_size,
       int output_size) : dictionary_(dictionary) {
     activation_function_ = ActivationFunctions::LOGISTIC;
-    lookup_layer_ = new LookupLayer(dictionary, embedding_dimension);
+    lookup_layer_ = new LookupLayer(dictionary->GetNumWords(),
+                                    embedding_dimension);
     linear_layer_ = new LinearLayer(embedding_dimension, hidden_size);
     rnn_layer_ = new RNNLayer(embedding_dimension, hidden_size);
     output_layer_ = new SoftmaxOutputLayer(hidden_size, output_size);
@@ -394,7 +112,7 @@ class RNN {
   }
 
   void SetFixedEmbeddings(const Matrix &fixed_embeddings,
-			  const std::vector<int> &word_ids) {
+                          const std::vector<int> &word_ids) {
     lookup_layer_->SetFixedEmbeddings(fixed_embeddings, word_ids);
   }
 
@@ -420,6 +138,8 @@ class RNN {
     accuracy_dev /= num_sentences_dev;
     std::cout << " Initial accuracy dev: " << accuracy_dev
               << std::endl;
+
+    //assert(false);
 
     for (int epoch = 0; epoch < num_epochs; ++epoch) {
       TrainEpoch(input_sequences, output_labels,
@@ -496,18 +216,73 @@ class RNN {
   }
 
   virtual void RunForwardPass(const std::vector<Input> &input_sequence) {
-    Matrix embedded_input = Matrix::Zero(GetEmbeddingSize(), input_sequence.size());
+    lookup_layer_->set_input_sequence(input_sequence);
+    lookup_layer_->RunForward();
+    linear_layer_->set_x(lookup_layer_->get_x());
+    linear_layer_->RunForward();
+    rnn_layer_->set_x(linear_layer_->get_y());
+    rnn_layer_->RunForward();
+
+    int t = input_sequence.size() - 1;
+    Vector hnext = rnn_layer_->get_h().col(t);
+    output_layer_->set_h(hnext);
+    output_layer_->RunForward();
+    //const Vector &y = output_layer_->get_y();
+    //std::cout << y[0] << " " << y[1] << " " << y[2] << std::endl;
+    //const Vector &p = output_layer_->GetProbabilities();
+    //std::cout << p[0] << " " << p[1] << " " << p[2] << std::endl;
+    //std::cout << std::endl;
+
+#if 0
+    Matrix embedded_input = Matrix::Zero(GetEmbeddingSize(),
+                                         input_sequence.size());
     lookup_layer_->RunForward(input_sequence, &embedded_input);
     linear_layer_->RunForward(embedded_input, &x_);
     rnn_layer_->RunForward(x_, &h_);
 
     int t = input_sequence.size() - 1;
     output_layer_->RunForward(h_.col(t));
+#endif
   }
 
   virtual void RunBackwardPass(const std::vector<Input> &input_sequence,
                                int output_label,
                                double learning_rate) {
+    int t = input_sequence.size() - 1;
+
+    //std::cout << "p[0] = " << output_layer_->GetProbabilities()[0] << std::endl;
+    output_layer_->set_output_label(output_label);
+
+    Matrix *dh = rnn_layer_->get_mutable_dh();
+    dh->setZero(hidden_size_, input_sequence.size());
+    Vector dhnext = Vector::Zero(hidden_size_);
+    output_layer_->set_dh(&dhnext);
+    Vector hnext = rnn_layer_->get_h().col(t);
+    output_layer_->set_h(hnext);
+    output_layer_->RunBackward();
+    //std::cout << "dhnext[0] = " << dhnext(0) << std::endl;
+    dh->col(t) = dhnext;
+    output_layer_->UpdateParameters(learning_rate);
+
+    Matrix *dx = linear_layer_->get_mutable_dy();
+    dx->setZero(GetInputSize(), input_sequence.size());
+    rnn_layer_->set_dx(dx);
+    rnn_layer_->RunBackward();
+    //std::cout << "dx[0,0] = " << (*dx)(0,0) << std::endl;
+    rnn_layer_->UpdateParameters(learning_rate);
+
+    Matrix *de = lookup_layer_->get_mutable_dx();
+    de->setZero(GetEmbeddingSize(), input_sequence.size());
+    linear_layer_->set_dx(de);
+    linear_layer_->RunBackward();
+    //std::cout << "de[0,0] = " << (*de)(0,0) << std::endl;
+    linear_layer_->UpdateParameters(learning_rate);
+
+    lookup_layer_->RunBackward();
+    lookup_layer_->UpdateParameters(learning_rate);
+
+
+#if 0
     //Vector dhnext = Vector::Zero(hidden_size_);
     Matrix dh = Matrix::Zero(hidden_size_, input_sequence.size());
     Matrix dx = Matrix::Zero(GetInputSize(), input_sequence.size());
@@ -519,6 +294,7 @@ class RNN {
     rnn_layer_->RunBackward(dh, learning_rate, &dx);
     linear_layer_->RunBackward(dx, learning_rate, &de);
     lookup_layer_->RunBackward(input_sequence, de, learning_rate);
+#endif
   }
 
  protected:
@@ -531,8 +307,8 @@ class RNN {
   int hidden_size_;
   int output_size_;
 
-  Matrix x_;
-  Matrix h_;
+  //Matrix x_;
+  //Matrix h_;
 };
 
 #if 0
