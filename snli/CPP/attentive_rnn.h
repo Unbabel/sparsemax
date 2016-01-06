@@ -17,19 +17,30 @@ class RNN {
       int embedding_dimension,
       int hidden_size,
       int output_size) : dictionary_(dictionary) {
-    activation_function_ = ActivationFunctions::LOGISTIC;
-    lookup_layer_ = new LookupLayer(dictionary->GetNumWords(),
-                                    embedding_dimension);
-    linear_layer_ = new LinearLayer(embedding_dimension, hidden_size);
-    rnn_layer_ = new RNNLayer(embedding_dimension, hidden_size);
-    output_layer_ = new SoftmaxOutputLayer(hidden_size, output_size);
+    use_attention_ = false; //true;
+    input_size_ = hidden_size; // Size of the projected embedded words.
     hidden_size_ = hidden_size;
     output_size_ = output_size;
+    activation_function_ = ActivationFunctions::TANH; //LOGISTIC;
+    lookup_layer_ = new LookupLayer(dictionary->GetNumWords(),
+                                    embedding_dimension);
+    linear_layer_ = new LinearLayer(embedding_dimension, input_size_);
+    rnn_layer_ = new RNNLayer(input_size_, hidden_size);
+    if (use_attention_) {
+      attention_layer_ = new AttentionLayer(hidden_size, hidden_size, hidden_size);
+      feedforward_layer_ = new FeedforwardLayer(2*hidden_size, hidden_size);
+    } else {
+      attention_layer_ = NULL;
+      feedforward_layer_ = NULL;
+    }
+    output_layer_ = new SoftmaxOutputLayer(hidden_size, output_size);
   }
   virtual ~RNN() {
     delete lookup_layer_;
     delete linear_layer_;
     delete rnn_layer_;
+    delete attention_layer_;
+    delete feedforward_layer_;
     delete output_layer_;
   }
 
@@ -53,6 +64,14 @@ class RNN {
 
     rnn_layer_->CollectAllParameters(weights, biases, weight_names,
 				     bias_names);
+
+    if (use_attention_) {
+      attention_layer_->CollectAllParameters(weights, biases, weight_names,
+					     bias_names);
+
+      feedforward_layer_->CollectAllParameters(weights, biases, weight_names,
+					     bias_names);
+    }
 
     output_layer_->CollectAllParameters(weights, biases, weight_names,
                                         bias_names);
@@ -218,13 +237,40 @@ class RNN {
   virtual void RunForwardPass(const std::vector<Input> &input_sequence) {
     lookup_layer_->set_input_sequence(input_sequence);
     lookup_layer_->RunForward();
+
     linear_layer_->set_x(lookup_layer_->get_x());
     linear_layer_->RunForward();
+
     rnn_layer_->set_x(linear_layer_->get_y());
     rnn_layer_->RunForward();
 
     int t = input_sequence.size() - 1;
     Vector hnext = rnn_layer_->get_h().col(t);
+
+    // Look for the separator symbol.
+    int wid_sep = dictionary_->GetWordId("__START__");
+    int separator = -1;
+    for (separator = 0; separator < input_sequence.size(); ++separator) {
+      if (input_sequence[separator].wid() == wid_sep) break;
+    }
+    assert(separator < input_sequence.size());
+    if (use_attention_) {
+      Matrix premise_states = rnn_layer_->get_h().leftCols(separator);
+      
+      attention_layer_->set_x(premise_states);
+      attention_layer_->set_y(hnext);
+      attention_layer_->RunForward();
+
+      // Concatenate u and hnext.
+      Matrix concatenated_states = Matrix::Zero(2*hidden_size_, 1);
+      concatenated_states.block(0, 0, hidden_size_, 1) = attention_layer_->get_u();
+      concatenated_states.block(hidden_size_, 0, hidden_size_, 1) = hnext;
+      feedforward_layer_->set_x(concatenated_states); 
+      feedforward_layer_->RunForward();
+
+      hnext = feedforward_layer_->get_h();
+    }
+
     output_layer_->set_h(hnext);
     output_layer_->RunForward();
     //const Vector &y = output_layer_->get_y();
@@ -250,6 +296,11 @@ class RNN {
                                double learning_rate) {
     int t = input_sequence.size() - 1;
 
+    output_layer_->ResetGradients();
+    rnn_layer_->ResetGradients();
+    linear_layer_->ResetGradients();
+    lookup_layer_->ResetGradients();
+
     //std::cout << "p[0] = " << output_layer_->GetProbabilities()[0] << std::endl;
     output_layer_->set_output_label(output_label);
 
@@ -262,23 +313,28 @@ class RNN {
     output_layer_->RunBackward();
     //std::cout << "dhnext[0] = " << dhnext(0) << std::endl;
     dh->col(t) = dhnext;
-    output_layer_->UpdateParameters(learning_rate);
+    //output_layer_->UpdateParameters(learning_rate);
 
     Matrix *dx = linear_layer_->get_mutable_dy();
     dx->setZero(GetInputSize(), input_sequence.size());
     rnn_layer_->set_dx(dx);
     rnn_layer_->RunBackward();
     //std::cout << "dx[0,0] = " << (*dx)(0,0) << std::endl;
-    rnn_layer_->UpdateParameters(learning_rate);
+    //rnn_layer_->UpdateParameters(learning_rate);
 
     Matrix *de = lookup_layer_->get_mutable_dx();
     de->setZero(GetEmbeddingSize(), input_sequence.size());
     linear_layer_->set_dx(de);
     linear_layer_->RunBackward();
     //std::cout << "de[0,0] = " << (*de)(0,0) << std::endl;
-    linear_layer_->UpdateParameters(learning_rate);
+    //linear_layer_->UpdateParameters(learning_rate);
 
     lookup_layer_->RunBackward();
+    //lookup_layer_->UpdateParameters(learning_rate);
+
+    output_layer_->UpdateParameters(learning_rate);
+    rnn_layer_->UpdateParameters(learning_rate);
+    linear_layer_->UpdateParameters(learning_rate);
     lookup_layer_->UpdateParameters(learning_rate);
 
 
@@ -303,9 +359,13 @@ class RNN {
   LookupLayer *lookup_layer_;
   LinearLayer *linear_layer_;
   RNNLayer *rnn_layer_;
+  AttentionLayer *attention_layer_;
+  FeedforwardLayer *feedforward_layer_;
   SoftmaxOutputLayer *output_layer_;
+  int input_size_;
   int hidden_size_;
   int output_size_;
+  bool use_attention_;
 
   //Matrix x_;
   //Matrix h_;

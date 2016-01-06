@@ -19,6 +19,7 @@ class Layer {
                                     std::vector<std::string> *weight_names,
                                     std::vector<std::string> *bias_names) = 0;
 
+  virtual void ResetGradients() = 0;
   virtual void RunForward() = 0;
   virtual void RunBackward() = 0;
   virtual void UpdateParameters(double learning_rate) = 0;
@@ -55,6 +56,10 @@ class LookupLayer : public Layer {
       E_.col(wid) = fixed_embeddings.col(i);
       updatable_[wid] = false;
     }
+  }
+
+  void ResetGradients() {
+    // TODO(afm): decide how to handle mini-batch gradients in this layer.
   }
 
   void RunForward() {
@@ -125,14 +130,19 @@ class LinearLayer : public Layer {
     bias_names->push_back("linear_bias");
   }
 
+  void ResetGradients() {
+    dWxy_.setZero(output_size_, input_size_);
+    dby_.setZero(output_size_);
+  }
+
   void RunForward() {
     y_ = (Wxy_ * (*x_)).colwise() + by_;
   }
 
   void RunBackward() {
-    *dx_ += Wxy_.transpose() * dy_; // check +=
-    dWxy_ = dy_ * (*x_).transpose();
-    dby_ = dy_.rowwise().sum();
+    (*dx_).noalias() += Wxy_.transpose() * dy_;
+    dWxy_.noalias() += dy_ * (*x_).transpose();
+    dby_.noalias() += dy_.rowwise().sum();
   }
 
   void UpdateParameters(double learning_rate) {
@@ -188,6 +198,11 @@ class SoftmaxOutputLayer : public Layer {
     bias_names->push_back("by");
   }
 
+  void ResetGradients() {
+    dWhy_.setZero(output_size_, hidden_size_);
+    dby_.setZero(output_size_);
+  }
+
   void RunForward() {
     y_ = Why_ * (*h_) + by_;
     double logsum = LogSumExp(y_);
@@ -195,25 +210,16 @@ class SoftmaxOutputLayer : public Layer {
   }
 
   void RunBackward() {
-    dWhy_ = Matrix::Zero(Why_.rows(), Why_.cols()); // CHANGE THIS!!!
-    dby_ = Vector::Zero(Why_.rows()); // CHANGE THIS!!!
-
-    //std::cout << p_[0] << " " << p_[1] << " " << p_[2] << std::endl;
-
     Vector dy = p_;
     dy[output_label_] -= 1.0; // Backprop into y (softmax grad).
-    dWhy_ += dy * h_->transpose();
-    dby_ += dy;
-    *dh_ += Why_.transpose() * dy; // Backprop into h. // CHECK +=!!!
+    dWhy_.noalias() += dy * h_->transpose();
+    dby_.noalias() += dy;
+    (*dh_).noalias() += Why_.transpose() * dy; // Backprop into h. // CHECK +=!!!
   }
 
   void UpdateParameters(double learning_rate) {
     Why_ -= learning_rate * dWhy_;
     by_ -= learning_rate * dby_;
-
-    //std::cout << "params output layer" << std::endl;
-    //std::cout << Why_(0,0) << std::endl; // WRONG!!!
-    //std::cout << by_(0,0) << std::endl;
   }
 
   void set_output_label(int output_label) {
@@ -241,12 +247,98 @@ class SoftmaxOutputLayer : public Layer {
   Vector *dh_;
 };
 
+class FeedforwardLayer : public Layer {
+ public:
+  FeedforwardLayer() {}
+  FeedforwardLayer(int input_size,
+		   int hidden_size) {
+    activation_function_ = ActivationFunctions::TANH;
+    input_size_ = input_size;
+    hidden_size_ = hidden_size;
+  }
+  virtual ~FeedforwardLayer() {}
+
+  virtual void CollectAllParameters(std::vector<Matrix*> *weights,
+                                    std::vector<Vector*> *biases,
+                                    std::vector<std::string> *weight_names,
+                                    std::vector<std::string> *bias_names) {
+    Wxh_ = Matrix::Zero(hidden_size_, input_size_);
+    bh_ = Vector::Zero(hidden_size_);
+
+    weights->push_back(&Wxh_);
+    biases->push_back(&bh_);
+
+    weight_names->push_back("Wxh");
+    bias_names->push_back("bh");
+  }
+
+  void ResetGradients() {
+    dWxh_.setZero(hidden_size_, input_size_);
+    dbh_.setZero(hidden_size_);
+  }
+
+  virtual void RunForward() {
+    int length = (*x_).cols();
+    h_.setZero(hidden_size_, length);
+    for (int t = 0; t < length; ++t) {
+      Matrix result;
+      EvaluateActivation(activation_function_,
+                         Wxh_ * (*x_).col(t) + bh_,
+                         &result);
+      h_.col(t) = result;
+    }
+  }
+
+  virtual void RunBackward() {
+    const Matrix &dy = dh_; // Just to avoid messing up the names.
+
+    int length = dy.cols();
+    for (int t = length - 1; t >= 0; --t) {
+      Vector dh = dy.col(t); // Backprop into h.
+      Matrix dhraw;
+      DerivateActivation(activation_function_, h_.col(t), &dhraw);
+      dhraw = dhraw.array() * dh.array();
+
+      dWxh_.noalias() += dhraw * x_->col(t).transpose();
+      dbh_.noalias() += dhraw;
+
+      dx_->col(t) += Wxh_.transpose() * dhraw; // Backprop into x.
+    }
+  }
+
+  void UpdateParameters(double learning_rate) {
+    Wxh_ -= learning_rate * dWxh_;
+    bh_ -= learning_rate * dbh_;
+  }
+
+  void set_x(const Matrix &x) { x_ = &x; }
+  void set_dx(Matrix *dx) { dx_ = dx; }
+  const Matrix &get_h() { return h_; }
+  Matrix *get_mutable_dh() { return &dh_; }
+
+ protected:
+  int activation_function_;
+  int hidden_size_;
+  int input_size_;
+
+  Matrix Wxh_;
+  Vector bh_;
+
+  Matrix dWxh_;
+  Vector dbh_;
+
+  const Matrix *x_; // Input.
+  Matrix h_; // Output.
+  Matrix *dx_;
+  Matrix dh_;
+};
+
 class RNNLayer : public Layer {
  public:
   RNNLayer() {}
   RNNLayer(int input_size,
            int hidden_size) {
-    activation_function_ = ActivationFunctions::LOGISTIC; // Change to TANH?
+    activation_function_ = ActivationFunctions::TANH;
     input_size_ = input_size;
     hidden_size_ = hidden_size;
     use_hidden_start_ = true;
@@ -281,6 +373,15 @@ class RNNLayer : public Layer {
     }
   }
 
+  void ResetGradients() {
+    dWxh_.setZero(hidden_size_, input_size_);
+    dbh_.setZero(hidden_size_);
+    dWhh_.setZero(hidden_size_, hidden_size_);
+    if (use_hidden_start_) {
+      dh0_.setZero(hidden_size_);
+    }
+  }
+
   virtual void RunForward() {
     int length = (*x_).cols();
     h_.setZero(hidden_size_, length);
@@ -297,31 +398,28 @@ class RNNLayer : public Layer {
   }
 
   virtual void RunBackward() {
-    dWhh_ = Matrix::Zero(Whh_.rows(), Whh_.cols()); // CHANGE THIS!!!
-    dWxh_ = Matrix::Zero(Wxh_.rows(), Wxh_.cols()); // CHANGE THIS!!!
-    dbh_ = Vector::Zero(Whh_.rows()); // CHANGE THIS!!!
     Vector dhnext = Vector::Zero(Whh_.rows());
-    const Matrix &dy = dh_;
+    const Matrix &dy = dh_; // Just to avoid messing up the names.
 
     int length = dy.cols();
-    dx_->setZero(input_size_, length); // CHANGE THIS!!!
+    // dx_->setZero(input_size_, length); // CHANGE THIS!!!
     for (int t = length - 1; t >= 0; --t) {
       Vector dh = dy.col(t) + dhnext; // Backprop into h.
       Matrix dhraw;
       DerivateActivation(activation_function_, h_.col(t), &dhraw);
       dhraw = dhraw.array() * dh.array();
 
-      dWxh_ += dhraw * x_->col(t).transpose();
-      dbh_ += dhraw;
+      dWxh_.noalias() += dhraw * x_->col(t).transpose();
+      dbh_.noalias() += dhraw;
       if (t > 0) {
-        dWhh_ += dhraw * h_.col(t-1).transpose();
+        dWhh_.noalias() += dhraw * h_.col(t-1).transpose();
       }
       dhnext.noalias() = Whh_.transpose() * dhraw;
 
-      dx_->col(t) = Wxh_.transpose() * dhraw; // Backprop into x.
+      dx_->col(t) += Wxh_.transpose() * dhraw; // Backprop into x.
     }
 
-    dh0_ = dhnext;
+    dh0_.noalias() += dhnext;
   }
 
   void UpdateParameters(double learning_rate) {
@@ -331,11 +429,6 @@ class RNNLayer : public Layer {
     if (use_hidden_start_) {
       h0_ -= learning_rate * dh0_;
     }
-    //std::cout << "params RNN layer" << std::endl;
-    //std::cout << Wxh_(0,0) << std::endl;
-    //std::cout << Whh_(0,0) << std::endl;
-    //std::cout << bh_(0,0) << std::endl;
-    //std::cout << h0_(0,0) << std::endl;
   }
 
   void set_x(const Matrix &x) { x_ = &x; }
@@ -363,6 +456,142 @@ class RNNLayer : public Layer {
   Matrix h_; // Output.
   Matrix *dx_;
   Matrix dh_;
+};
+
+class AttentionLayer : public Layer {
+ public:
+  AttentionLayer() {}
+  AttentionLayer(int input_size,
+		 int control_size,
+		 int hidden_size) {
+    activation_function_ = ActivationFunctions::TANH;
+    input_size_ = input_size;
+    control_size_ = control_size;
+    hidden_size_ = hidden_size;
+  }
+  virtual ~AttentionLayer() {}
+
+  virtual void CollectAllParameters(std::vector<Matrix*> *weights,
+                                    std::vector<Vector*> *biases,
+                                    std::vector<std::string> *weight_names,
+                                    std::vector<std::string> *bias_names) {
+    Wxz_ = Matrix::Zero(hidden_size_, input_size_);
+    Wyz_ = Matrix::Zero(hidden_size_, control_size_);
+    bz_ = Vector::Zero(hidden_size_);
+    wzp_ = Vector::Zero(hidden_size_);
+
+    weights->push_back(&Wxz_);
+    weights->push_back(&Wyz_);
+
+    biases->push_back(&bz_);
+    biases->push_back(&wzp_); // Not really a bias, but it goes here.
+
+    weight_names->push_back("Wxz");
+    weight_names->push_back("Wyz");
+
+    bias_names->push_back("bz");
+    bias_names->push_back("wzp");
+  }
+
+  void ResetGradients() {
+    dWxz_.setZero(hidden_size_, input_size_);
+    dWyz_.setZero(hidden_size_, control_size_);
+    dbz_.setZero(hidden_size_);
+    wzp_.setZero(hidden_size_);
+  }
+
+  virtual void RunForward() {
+    int length = (*x_).cols();
+    z_.setZero(hidden_size_, length);
+
+    for (int t = 0; t < length; ++t) {
+      Matrix result;
+      EvaluateActivation(activation_function_,
+                         Wxz_ * (*x_).col(t) + bz_ + Wyz_ * (*y_),
+                         &result);
+      z_.col(t) = result;
+    }
+
+    Vector v = z_.transpose() * wzp_;
+    double logsum = LogSumExp(v);
+    //p_.noalias() = (v.array() - logsum).exp();
+    p_ = (v.array() - logsum).exp();
+    u_.noalias() = (*x_) * p_;
+  }
+
+  virtual void RunBackward() {
+    int length = (*x_).cols();
+    dp_.noalias() = (*x_).transpose() * du_;
+
+    // Compute Jsoftmax * dp_.
+    // Jsoftmax = diag(p_) - p_*p_.transpose().
+    // Jsoftmax * dp_ = p_.array() * dp_.array() - p_* (p_.transpose() * dp_).
+    //                = p_.array() * (dp_ - val).array(),
+    // where val = p_.transpose() * dp_.
+    float val = p_.transpose() * dp_;
+    Vector Jdp = p_.array() * (dp_.array() - val);
+    dz_ = wzp_ * Jdp.transpose();
+
+    Matrix dzraw;
+    for (int t = 0; t < length; ++t) {
+      Matrix result; // TODO: perform this in a matrix-level way to be more efficient.
+      DerivateActivation(activation_function_, z_.col(t), &result);
+      dzraw.col(t).noalias() = result;
+    }
+    dzraw = dzraw.array() * dz_.array();
+    Vector dzraw_sum = dzraw.rowwise().sum();
+
+    *dx_ += Wxz_.transpose() * dzraw;
+    *dx_ += du_ * p_.transpose();
+    *dy_ += Wyz_.transpose() * dzraw_sum;
+
+    dwzp_ += z_ * Jdp.transpose();
+    dWxz_.noalias() += dzraw * (*x_).transpose();
+    dWyz_.noalias() += dzraw_sum * (*y_).transpose();
+    dbz_.noalias() += dzraw_sum;
+  }
+
+  void UpdateParameters(double learning_rate) {
+    Wxz_ -= learning_rate * dWxz_;
+    Wyz_ -= learning_rate * dWyz_;
+    dbz_ -= learning_rate * dbz_;
+    wzp_ -= learning_rate * dwzp_;
+  }
+
+  void set_x(const Matrix &x) { x_ = &x; }
+  void set_y(const Vector &y) { y_ = &y; }
+  void set_dx(Matrix *dx) { dx_ = dx; }
+  void set_dy(Vector *dy) { dy_ = dy; }
+  const Vector &get_u() { return u_; }
+  Vector *get_mutable_du() { return &du_; }
+
+ protected:
+  int activation_function_;
+  int hidden_size_;
+  int input_size_;
+  int control_size_;
+
+  Matrix Wxz_;
+  Matrix Wyz_;
+  Vector bz_;
+  Vector wzp_;
+
+  Matrix dWxz_;
+  Matrix dWyz_;
+  Vector dbz_;
+  Vector dwzp_;
+
+  const Matrix *x_; // Input.
+  const Vector *y_; // Input (control).
+  Vector u_; // Output.
+  Matrix z_;
+  Vector p_;
+
+  Matrix *dx_;
+  Vector *dy_;
+  Matrix dz_;
+  Vector dp_;
+  Vector du_;
 };
 
 #endif /* LAYER_H_ */
