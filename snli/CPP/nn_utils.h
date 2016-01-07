@@ -104,6 +104,40 @@ void DerivateActivation(int activation_function, const Matrix &dh,
   }
 }
 
+void EvaluateActivation(int activation_function, const Vector &hu,
+                        Vector *h) {
+  if (activation_function == ActivationFunctions::TANH) {
+#if 0
+    *h = Matrix::Zero(hu.rows(), hu.cols());
+    float const *begin = hu.data();
+    float const *end = begin + hu.rows() * hu.cols();
+    float *it_out = h->data();
+    for(const float *it = begin;
+        it != end;
+        ++it, ++it_out) {
+      *it_out = static_cast<float>(tanh(*it));
+    }
+#else
+    *h = hu.unaryExpr(std::ptr_fun<float, float>(std::tanh));
+#endif
+  } else if (activation_function == ActivationFunctions::LOGISTIC) {
+    *h = hu.unaryExpr([](float t) -> float { return 1.0 / (1.0 + exp(-t)); });
+  } else {
+    assert(false);
+  }
+}
+
+void DerivateActivation(int activation_function, const Vector &dh,
+                        Vector *dhu) {
+  if (activation_function == ActivationFunctions::TANH) {
+    *dhu = (1.0 - dh.array() * dh.array());
+  } else if (activation_function == ActivationFunctions::LOGISTIC) {
+    *dhu = (1.0 - dh.array()) * dh.array();
+  } else {
+    assert(false);
+  }
+}
+
 double LogSumExp(const Vector &x) {
 #if 0
   //return log(x.unaryExpr(std::ptr_fun(exp)).sum());

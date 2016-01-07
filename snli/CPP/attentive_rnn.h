@@ -28,11 +28,19 @@ class RNN {
     rnn_layer_ = new RNNLayer(input_size_, hidden_size);
     if (use_attention_) {
       attention_layer_ = new AttentionLayer(hidden_size, hidden_size, hidden_size);
-      feedforward_layer_ = new FeedforwardLayer(2*hidden_size, hidden_size);
     } else {
       attention_layer_ = NULL;
-      feedforward_layer_ = NULL;
     }
+    hypothesis_selector_layer_ = new SelectorLayer;
+    if (use_attention_) {
+      premise_extractor_layer_ = new MatrixSelectorLayer;
+      premise_selector_layer_ = NULL;
+    } else {
+      premise_extractor_layer_ = NULL;
+      premise_selector_layer_ = new SelectorLayer;
+    }
+    concatenator_layer_ = new ConcatenatorLayer;
+    feedforward_layer_ = new FeedforwardLayer(2*hidden_size, hidden_size);
     output_layer_ = new SoftmaxOutputLayer(hidden_size, output_size);
   }
   virtual ~RNN() {
@@ -40,6 +48,10 @@ class RNN {
     delete linear_layer_;
     delete rnn_layer_;
     delete attention_layer_;
+    delete hypothesis_selector_layer_;
+    delete premise_extractor_layer_;
+    delete premise_selector_layer_;
+    delete concatenator_layer_;
     delete feedforward_layer_;
     delete output_layer_;
   }
@@ -68,10 +80,10 @@ class RNN {
     if (use_attention_) {
       attention_layer_->CollectAllParameters(weights, biases, weight_names,
 					     bias_names);
-
-      feedforward_layer_->CollectAllParameters(weights, biases, weight_names,
-					     bias_names);
     }
+
+    feedforward_layer_->CollectAllParameters(weights, biases, weight_names,
+					     bias_names);
 
     output_layer_->CollectAllParameters(weights, biases, weight_names,
                                         bias_names);
@@ -85,8 +97,8 @@ class RNN {
     rnn_layer_->InitializeParameters();
     if (use_attention_) {
       attention_layer_->InitializeParameters();
-      feedforward_layer_->InitializeParameters();
     }
+    feedforward_layer_->InitializeParameters();
     output_layer_->InitializeParameters();
   }
 
@@ -194,7 +206,170 @@ class RNN {
     *predicted_label = prediction;
   }
 
-  virtual void RunForwardPass(const std::vector<Input> &input_sequence) {
+  void RunForwardPass(const std::vector<Input> &input_sequence) {
+    // Look for the separator symbol.
+    int wid_sep = dictionary_->GetWordId("__START__");
+    int separator = -1;
+    for (separator = 0; separator < input_sequence.size(); ++separator) {
+      if (input_sequence[separator].wid() == wid_sep) break;
+    }
+    assert(separator < input_sequence.size());
+
+    lookup_layer_->set_input_sequence(input_sequence);
+    lookup_layer_->RunForward();
+
+    linear_layer_->set_x(lookup_layer_->get_x());
+    linear_layer_->RunForward();
+
+    rnn_layer_->set_x(linear_layer_->get_y());
+    rnn_layer_->RunForward();
+
+    int t = input_sequence.size() - 1;
+
+    if (use_attention_) {
+
+      premise_extractor_layer_->set_x(rnn_layer_->get_h());
+      premise_extractor_layer_->DefineBlock(0, 0, hidden_size_, separator);
+      premise_extractor_layer_->RunForward();
+
+      hypothesis_selector_layer_->set_x(rnn_layer_->get_h());
+      hypothesis_selector_layer_->DefineBlock(0, t, hidden_size_, 1);
+      hypothesis_selector_layer_->RunForward();
+
+      attention_layer_->set_x(premise_extractor_layer_->get_y());
+      attention_layer_->set_y(hypothesis_selector_layer_->get_y());
+      attention_layer_->RunForward();
+
+      concatenator_layer_->set_x1(attention_layer_->get_u());
+      concatenator_layer_->set_x2(hypothesis_selector_layer_->get_y());
+      concatenator_layer_->RunForward();
+
+      feedforward_layer_->set_x(concatenator_layer_->get_y());
+      feedforward_layer_->RunForward();
+
+    } else {
+
+      premise_selector_layer_->set_x(rnn_layer_->get_h());
+      premise_selector_layer_->DefineBlock(0, separator, hidden_size_, 1);
+      premise_selector_layer_->RunForward();
+
+      hypothesis_selector_layer_->set_x(rnn_layer_->get_h());
+      hypothesis_selector_layer_->DefineBlock(0, t, hidden_size_, 1);
+      hypothesis_selector_layer_->RunForward();
+
+      concatenator_layer_->set_x1(premise_selector_layer_->get_y());
+      concatenator_layer_->set_x2(hypothesis_selector_layer_->get_y());
+      concatenator_layer_->RunForward();
+
+      feedforward_layer_->set_x(concatenator_layer_->get_y());
+      feedforward_layer_->RunForward();
+    }
+
+    output_layer_->set_h(feedforward_layer_->get_h());
+    output_layer_->RunForward();
+  }
+
+  void RunBackwardPass(const std::vector<Input> &input_sequence,
+                               int output_label,
+                               double learning_rate) {
+    // Look for the separator symbol.
+    int wid_sep = dictionary_->GetWordId("__START__");
+    int separator = -1;
+    for (separator = 0; separator < input_sequence.size(); ++separator) {
+      if (input_sequence[separator].wid() == wid_sep) break;
+    }
+    assert(separator < input_sequence.size());
+
+    int t = input_sequence.size() - 1;
+
+    // Reset parameter gradients.
+    output_layer_->ResetGradients();
+    feedforward_layer_->ResetGradients();
+    rnn_layer_->ResetGradients();
+    linear_layer_->ResetGradients();
+    lookup_layer_->ResetGradients();
+    if (use_attention_) {
+      attention_layer_->ResetGradients();
+    }
+
+    // Reset variable derivatives.
+    feedforward_layer_->get_mutable_dh()->setZero(hidden_size_, 1);
+    concatenator_layer_->get_mutable_dy()->setZero(2*hidden_size_, 1);
+    if (use_attention_) {
+      attention_layer_->get_mutable_du()->setZero(hidden_size_, 1);
+      premise_extractor_layer_->get_mutable_dy()->setZero(hidden_size_, separator);
+      hypothesis_selector_layer_->get_mutable_dy()->setZero(hidden_size_, 1);
+    } else {
+      premise_selector_layer_->get_mutable_dy()->setZero(hidden_size_, 1);
+      hypothesis_selector_layer_->get_mutable_dy()->setZero(hidden_size_, 1);
+    }
+    rnn_layer_->get_mutable_dh()->setZero(hidden_size_, input_sequence.size());
+    linear_layer_->get_mutable_dy()->setZero(GetInputSize(), input_sequence.size());
+    lookup_layer_->get_mutable_dx()->setZero(GetEmbeddingSize(), input_sequence.size());
+
+    // Backprop.
+    output_layer_->set_output_label(output_label);
+    output_layer_->set_dh(feedforward_layer_->get_mutable_dh());
+    output_layer_->RunBackward();
+
+    feedforward_layer_->set_dx(concatenator_layer_->get_mutable_dy());
+    feedforward_layer_->RunBackward();
+
+    if (use_attention_) {
+
+      concatenator_layer_->set_dx1(attention_layer_->get_mutable_du());
+      concatenator_layer_->set_dx2(hypothesis_selector_layer_->get_mutable_dy());
+      concatenator_layer_->RunBackward();
+
+      attention_layer_->set_dx(premise_extractor_layer_->get_mutable_dy());
+      attention_layer_->set_dy(hypothesis_selector_layer_->get_mutable_dy());
+      attention_layer_->RunBackward();
+
+      premise_extractor_layer_->set_dx(rnn_layer_->get_mutable_dh());
+      premise_extractor_layer_->DefineBlock(0, 0, hidden_size_, separator);
+      premise_extractor_layer_->RunBackward();
+
+      hypothesis_selector_layer_->set_dx(rnn_layer_->get_mutable_dh());
+      hypothesis_selector_layer_->DefineBlock(0, t, hidden_size_, 1);
+      hypothesis_selector_layer_->RunBackward();
+
+    } else {
+
+      concatenator_layer_->set_dx1(premise_selector_layer_->get_mutable_dy());
+      concatenator_layer_->set_dx2(hypothesis_selector_layer_->get_mutable_dy());
+      concatenator_layer_->RunBackward();
+
+      premise_selector_layer_->set_dx(rnn_layer_->get_mutable_dh());
+      premise_selector_layer_->DefineBlock(0, separator, hidden_size_, 1);
+      premise_selector_layer_->RunBackward();
+
+      hypothesis_selector_layer_->set_dx(rnn_layer_->get_mutable_dh());
+      hypothesis_selector_layer_->DefineBlock(0, t, hidden_size_, 1);
+      hypothesis_selector_layer_->RunBackward();
+
+   }
+
+    rnn_layer_->set_dx(linear_layer_->get_mutable_dy());
+    rnn_layer_->RunBackward();
+
+    linear_layer_->set_dx(lookup_layer_->get_mutable_dx());
+    linear_layer_->RunBackward();
+
+    lookup_layer_->RunBackward();
+
+    // Update parameters.
+    output_layer_->UpdateParameters(learning_rate);
+    if (use_attention_) {
+      attention_layer_->UpdateParameters(learning_rate);
+    }
+    feedforward_layer_->UpdateParameters(learning_rate);
+    rnn_layer_->UpdateParameters(learning_rate);
+    linear_layer_->UpdateParameters(learning_rate);
+    lookup_layer_->UpdateParameters(learning_rate);
+  }
+
+#if 0
+  void RunForwardPass_old(const std::vector<Input> &input_sequence) {
     // Look for the separator symbol.
     int wid_sep = dictionary_->GetWordId("__START__");
     int separator = -1;
@@ -229,29 +404,23 @@ class RNN {
       feedforward_layer_->RunForward();
 
       hnext = feedforward_layer_->get_h();
+    } else {
+      Vector premise_final_state = rnn_layer_->get_h().col(separator);
+      // Concatenate premise_final_state and hnext.
+      Matrix concatenated_states = Matrix::Zero(2*hidden_size_, 1);
+      concatenated_states.block(0, 0, hidden_size_, 1) = premise_final_state;
+      concatenated_states.block(hidden_size_, 0, hidden_size_, 1) = hnext;
+      feedforward_layer_->set_x(concatenated_states);
+      feedforward_layer_->RunForward();
+
+      hnext = feedforward_layer_->get_h();
     }
 
     output_layer_->set_h(hnext);
     output_layer_->RunForward();
-    //const Vector &y = output_layer_->get_y();
-    //std::cout << y[0] << " " << y[1] << " " << y[2] << std::endl;
-    //const Vector &p = output_layer_->GetProbabilities();
-    //std::cout << p[0] << " " << p[1] << " " << p[2] << std::endl;
-    //std::cout << std::endl;
-
-#if 0
-    Matrix embedded_input = Matrix::Zero(GetEmbeddingSize(),
-                                         input_sequence.size());
-    lookup_layer_->RunForward(input_sequence, &embedded_input);
-    linear_layer_->RunForward(embedded_input, &x_);
-    rnn_layer_->RunForward(x_, &h_);
-
-    int t = input_sequence.size() - 1;
-    output_layer_->RunForward(h_.col(t));
-#endif
   }
 
-  virtual void RunBackwardPass(const std::vector<Input> &input_sequence,
+  void RunBackwardPass_old(const std::vector<Input> &input_sequence,
                                int output_label,
                                double learning_rate) {
     // Look for the separator symbol.
@@ -265,11 +434,11 @@ class RNN {
     int t = input_sequence.size() - 1;
 
     output_layer_->ResetGradients();
+    feedforward_layer_->ResetGradients();
     rnn_layer_->ResetGradients();
     linear_layer_->ResetGradients();
     lookup_layer_->ResetGradients();
     if (use_attention_) {
-      feedforward_layer_->ResetGradients();
       attention_layer_->ResetGradients();
     }
 
@@ -316,7 +485,34 @@ class RNN {
       attention_layer_->RunBackward();
       dh->leftCols(separator) += dps;
       dh->col(t) += dhnext;
+
     } else {
+
+      Vector dhh = Vector::Zero(hidden_size_);
+      output_layer_->set_dh(&dhh);
+      output_layer_->set_h(feedforward_layer_->get_h());
+      output_layer_->RunBackward();
+      Matrix *dhm = feedforward_layer_->get_mutable_dh();
+      dhm->setZero(hidden_size_, 1);
+      dhm->col(0) += dhh;
+
+      // Concatenate du and dhnext.
+      Matrix dc = Matrix::Zero(2*hidden_size_, 1);
+      feedforward_layer_->set_dx(&dc);
+      Vector premise_final_state = rnn_layer_->get_h().col(separator);
+      // Concatenate premise_final_state and hnext.
+      Matrix concatenated_states = Matrix::Zero(2*hidden_size_, 1);
+      concatenated_states.block(0, 0, hidden_size_, 1) = premise_final_state;
+      concatenated_states.block(hidden_size_, 0, hidden_size_, 1) = hnext;
+      feedforward_layer_->set_x(concatenated_states);
+      feedforward_layer_->RunBackward();
+
+      Matrix *dh = rnn_layer_->get_mutable_dh();
+      dh->setZero(hidden_size_, input_sequence.size());
+      dh->col(separator) += dc.block(0, 0, hidden_size_, 1);
+      dh->col(t) += dc.block(hidden_size_, 0, hidden_size_, 1);
+
+#if 0
       Matrix *dh = rnn_layer_->get_mutable_dh();
       dh->setZero(hidden_size_, input_sequence.size());
       Vector dhnext = Vector::Zero(hidden_size_);
@@ -324,6 +520,7 @@ class RNN {
       output_layer_->set_h(hnext);
       output_layer_->RunBackward();
       dh->col(t) += dhnext;
+#endif
     }
 
     //output_layer_->UpdateParameters(learning_rate);
@@ -347,9 +544,9 @@ class RNN {
 
     output_layer_->UpdateParameters(learning_rate);
     if (use_attention_) {
-      feedforward_layer_->UpdateParameters(learning_rate);
       attention_layer_->UpdateParameters(learning_rate);
     }
+    feedforward_layer_->UpdateParameters(learning_rate);
     rnn_layer_->UpdateParameters(learning_rate);
     linear_layer_->UpdateParameters(learning_rate);
     lookup_layer_->UpdateParameters(learning_rate);
@@ -369,6 +566,7 @@ class RNN {
     lookup_layer_->RunBackward(input_sequence, de, learning_rate);
 #endif
   }
+#endif
 
  protected:
   Dictionary *dictionary_;
@@ -378,6 +576,10 @@ class RNN {
   RNNLayer *rnn_layer_;
   AttentionLayer *attention_layer_;
   FeedforwardLayer *feedforward_layer_;
+  SelectorLayer *hypothesis_selector_layer_;
+  SelectorLayer *premise_selector_layer_;
+  MatrixSelectorLayer *premise_extractor_layer_;
+  ConcatenatorLayer *concatenator_layer_;
   SoftmaxOutputLayer *output_layer_;
   int input_size_;
   int hidden_size_;

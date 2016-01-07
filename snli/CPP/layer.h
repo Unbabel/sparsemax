@@ -28,23 +28,6 @@ class Layer {
     std::vector<std::string> bias_names;
     CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
 
-    bool read_from_file = false;
-    if (read_from_file) {
-      for (int i = 0; i < biases.size(); ++i) {
-        auto b = biases[i];
-        auto name = bias_names[i];
-        std::cout << "Loading " << name << "..." << std::endl;
-        LoadVectorParameter(name, b);
-      }
-      for (int i = 0; i < weights.size(); ++i) {
-        auto W = weights[i];
-        auto name = weight_names[i];
-        std::cout << "Loading " << name << "..." << std::endl;
-        LoadMatrixParameter(name, W);
-      }
-      return;
-    }
-
     for (auto b: biases) {
       b->setZero();
     }
@@ -61,10 +44,179 @@ class Layer {
     }
   }
 
+  void ReadParameters() {
+    std::vector<Matrix*> weights;
+    std::vector<Vector*> biases;
+    std::vector<std::string> weight_names;
+    std::vector<std::string> bias_names;
+    CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
+
+    for (int i = 0; i < biases.size(); ++i) {
+      auto b = biases[i];
+      auto name = bias_names[i];
+      std::cout << "Loading " << name << "..." << std::endl;
+      LoadVectorParameter(name, b);
+    }
+    for (int i = 0; i < weights.size(); ++i) {
+      auto W = weights[i];
+      auto name = weight_names[i];
+      std::cout << "Loading " << name << "..." << std::endl;
+      LoadMatrixParameter(name, W);
+    }
+  }
+
   virtual void ResetGradients() = 0;
   virtual void RunForward() = 0;
   virtual void RunBackward() = 0;
   virtual void UpdateParameters(double learning_rate) = 0;
+};
+
+class SelectorLayer {
+ public:
+  SelectorLayer() {};
+  ~SelectorLayer() {};
+
+  void CollectAllParameters(std::vector<Matrix*> *weights,
+			    std::vector<Vector*> *biases,
+			    std::vector<std::string> *weight_names,
+			    std::vector<std::string> *bias_names) {}
+
+  double GetUniformInitializationLimit(Matrix *W) { return 0.0; }
+
+  void ResetGradients() {}
+  void RunForward() {
+    assert(num_rows_ == 1 || num_columns_ == 1);
+    y_ = (*x_).block(first_row_, first_column_,
+		     num_rows_, num_columns_);
+  }
+
+  void RunBackward() {
+    (*dx_).block(first_row_, first_column_, num_rows_, num_columns_) += dy_;
+  }
+
+  void UpdateParameters(double learning_rate) {}
+
+  void DefineBlock(int first_row, int first_column,
+		   int num_rows, int num_columns) {
+    first_row_ = first_row;
+    first_column_ = first_column;
+    num_rows_ = num_rows;
+    num_columns_ = num_columns;
+  }
+
+  void set_x(const Matrix &x) { x_ = &x; }
+  void set_dx(Matrix *dx) { dx_ = dx; }
+  const Vector &get_y() { return y_; }
+  Vector *get_mutable_dy() { return &dy_; }
+
+ protected:
+  int first_row_;
+  int first_column_;
+  int num_rows_;
+  int num_columns_;
+
+  const Matrix *x_; // Input.
+  Vector y_; // Output.
+  Matrix *dx_;
+  Vector dy_;
+};
+
+class MatrixSelectorLayer {
+ public:
+  MatrixSelectorLayer() {};
+  ~MatrixSelectorLayer() {};
+
+  void CollectAllParameters(std::vector<Matrix*> *weights,
+			    std::vector<Vector*> *biases,
+			    std::vector<std::string> *weight_names,
+			    std::vector<std::string> *bias_names) {}
+
+  double GetUniformInitializationLimit(Matrix *W) { return 0.0; }
+
+  void ResetGradients() {}
+  void RunForward() {
+    y_ = (*x_).block(first_row_, first_column_,
+		     num_rows_, num_columns_);
+  }
+
+  void RunBackward() {
+    (*dx_).block(first_row_, first_column_, num_rows_, num_columns_) += dy_;
+  }
+
+  void UpdateParameters(double learning_rate) {}
+
+  void DefineBlock(int first_row, int first_column,
+		   int num_rows, int num_columns) {
+    first_row_ = first_row;
+    first_column_ = first_column;
+    num_rows_ = num_rows;
+    num_columns_ = num_columns;
+  }
+
+  void set_x(const Matrix &x) { x_ = &x; }
+  void set_dx(Matrix *dx) { dx_ = dx; }
+  const Matrix &get_y() { return y_; }
+  Matrix *get_mutable_dy() { return &dy_; }
+
+ protected:
+  int first_row_;
+  int first_column_;
+  int num_rows_;
+  int num_columns_;
+
+  const Matrix *x_; // Input.
+  Matrix y_; // Output.
+  Matrix *dx_;
+  Matrix dy_;
+};
+
+class ConcatenatorLayer {
+ public:
+  ConcatenatorLayer() {};
+  ~ConcatenatorLayer() {};
+
+  void CollectAllParameters(std::vector<Matrix*> *weights,
+			    std::vector<Vector*> *biases,
+			    std::vector<std::string> *weight_names,
+			    std::vector<std::string> *bias_names) {}
+
+  double GetUniformInitializationLimit(Matrix *W) { return 0.0; }
+
+  void ResetGradients() {}
+  void RunForward() {
+    //assert(y_.size() == x1_->size() + x2_->size());
+    y_.setZero(x1_->size() + x2_->size());
+    y_.head(x1_->size()) = *x1_;
+    y_.tail(x2_->size()) = *x2_;
+  }
+
+  void RunBackward() {
+    assert(dy_.size() == dx1_->size() + dx2_->size());
+    *dx1_ += dy_.head(dx1_->size());
+    *dx2_ += dy_.tail(dx2_->size());
+  }
+
+  void UpdateParameters(double learning_rate) {}
+
+  void set_x1(const Vector &x1) { x1_ = &x1; }
+  void set_x2(const Vector &x2) { x2_ = &x2; }
+  void set_dx1(Vector *dx1) { dx1_ = dx1; }
+  void set_dx2(Vector *dx2) { dx2_ = dx2; }
+  const Vector &get_y() { return y_; }
+  Vector *get_mutable_dy() { return &dy_; }
+
+ protected:
+  int first_row_;
+  int first_column_;
+  int num_rows_;
+  int num_columns_;
+
+  const Vector *x1_; // Input.
+  const Vector *x2_; // Input.
+  Vector y_; // Output.
+  Vector *dx1_;
+  Vector *dx2_;
+  Vector dy_;
 };
 
 class LookupLayer : public Layer {
@@ -316,6 +468,90 @@ class FeedforwardLayer : public Layer {
     hidden_size_ = hidden_size;
   }
   virtual ~FeedforwardLayer() {}
+
+  virtual void CollectAllParameters(std::vector<Matrix*> *weights,
+                                    std::vector<Vector*> *biases,
+                                    std::vector<std::string> *weight_names,
+                                    std::vector<std::string> *bias_names) {
+    Wxh_ = Matrix::Zero(hidden_size_, input_size_);
+    bh_ = Vector::Zero(hidden_size_);
+
+    weights->push_back(&Wxh_);
+    biases->push_back(&bh_);
+
+    weight_names->push_back("Wxh");
+    bias_names->push_back("bh");
+  }
+
+  double GetUniformInitializationLimit(Matrix *W) {
+    int num_outputs = W->rows();
+    int num_inputs = W->cols();
+    double coeff;
+    if (activation_function_ == ActivationFunctions::LOGISTIC) {
+      coeff = 4.0;
+    } else {
+      coeff = 1.0;
+    }
+    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
+  }
+
+  void ResetGradients() {
+    dWxh_.setZero(hidden_size_, input_size_);
+    dbh_.setZero(hidden_size_);
+  }
+
+  virtual void RunForward() {
+    EvaluateActivation(activation_function_,
+		       Wxh_ * (*x_) + bh_,
+		       &h_);
+  }
+
+  virtual void RunBackward() {
+    Vector dhraw;
+    DerivateActivation(activation_function_, h_, &dhraw);
+    dhraw = dhraw.array() * dh_.array();
+    dWxh_.noalias() += dhraw * (*x_).transpose();
+    dbh_.noalias() += dhraw;
+    *dx_ += Wxh_.transpose() * dhraw; // Backprop into x.
+  }
+
+  void UpdateParameters(double learning_rate) {
+    Wxh_ -= learning_rate * dWxh_;
+    bh_ -= learning_rate * dbh_;
+  }
+
+  void set_x(const Vector &x) { x_ = &x; }
+  void set_dx(Vector *dx) { dx_ = dx; }
+  const Vector &get_h() { return h_; }
+  Vector *get_mutable_dh() { return &dh_; }
+
+ protected:
+  int activation_function_;
+  int hidden_size_;
+  int input_size_;
+
+  Matrix Wxh_;
+  Vector bh_;
+
+  Matrix dWxh_;
+  Vector dbh_;
+
+  const Vector *x_; // Input.
+  Vector h_; // Output.
+  Vector *dx_;
+  Vector dh_;
+};
+
+class MatrixFeedforwardLayer : public Layer {
+ public:
+  MatrixFeedforwardLayer() {}
+  MatrixFeedforwardLayer(int input_size,
+                   int hidden_size) {
+    activation_function_ = ActivationFunctions::TANH;
+    input_size_ = input_size;
+    hidden_size_ = hidden_size;
+  }
+  virtual ~MatrixFeedforwardLayer() {}
 
   virtual void CollectAllParameters(std::vector<Matrix*> *weights,
                                     std::vector<Vector*> *biases,
