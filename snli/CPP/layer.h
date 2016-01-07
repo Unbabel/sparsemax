@@ -19,12 +19,53 @@ class Layer {
                                     std::vector<std::string> *weight_names,
                                     std::vector<std::string> *bias_names) = 0;
 
+  virtual double GetUniformInitializationLimit(Matrix *W) = 0;
+
+  void InitializeParameters() {
+    std::vector<Matrix*> weights;
+    std::vector<Vector*> biases;
+    std::vector<std::string> weight_names;
+    std::vector<std::string> bias_names;
+    CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
+
+    bool read_from_file = false;
+    if (read_from_file) {
+      for (int i = 0; i < biases.size(); ++i) {
+        auto b = biases[i];
+        auto name = bias_names[i];
+        std::cout << "Loading " << name << "..." << std::endl;
+        LoadVectorParameter(name, b);
+      }
+      for (int i = 0; i < weights.size(); ++i) {
+        auto W = weights[i];
+        auto name = weight_names[i];
+        std::cout << "Loading " << name << "..." << std::endl;
+        LoadMatrixParameter(name, W);
+      }
+      return;
+    }
+
+    for (auto b: biases) {
+      b->setZero();
+    }
+    for (auto W: weights) {
+      double max = GetUniformInitializationLimit(W);
+      for (int i = 0; i < W->rows(); ++i) {
+        for (int j = 0; j < W->cols(); ++j) {
+          double t = max *
+            (2.0*static_cast<double>(rand()) / RAND_MAX - 1.0);
+          (*W)(i, j) = t;
+          //std::cout << t/max << std::endl;
+        }
+      }
+    }
+  }
+
   virtual void ResetGradients() = 0;
   virtual void RunForward() = 0;
   virtual void RunBackward() = 0;
   virtual void UpdateParameters(double learning_rate) = 0;
 };
-
 
 class LookupLayer : public Layer {
  public:
@@ -47,6 +88,10 @@ class LookupLayer : public Layer {
 
     weights->push_back(&E_);
     weight_names->push_back("embeddings");
+  }
+
+  double GetUniformInitializationLimit(Matrix *W) {
+    return 0.05;
   }
 
   void SetFixedEmbeddings(const Matrix &fixed_embeddings,
@@ -130,6 +175,13 @@ class LinearLayer : public Layer {
     bias_names->push_back("linear_bias");
   }
 
+  double GetUniformInitializationLimit(Matrix *W) {
+    int num_outputs = W->rows();
+    int num_inputs = W->cols();
+    double coeff = 1.0; // Like in TANH.
+    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
+  }
+
   void ResetGradients() {
     dWxy_.setZero(output_size_, input_size_);
     dby_.setZero(output_size_);
@@ -198,6 +250,13 @@ class SoftmaxOutputLayer : public Layer {
     bias_names->push_back("by");
   }
 
+  double GetUniformInitializationLimit(Matrix *W) {
+    int num_outputs = W->rows();
+    int num_inputs = W->cols();
+    double coeff = 4.0; // Like in LOGISTIC.
+    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
+  }
+
   void ResetGradients() {
     dWhy_.setZero(output_size_, hidden_size_);
     dby_.setZero(output_size_);
@@ -251,7 +310,7 @@ class FeedforwardLayer : public Layer {
  public:
   FeedforwardLayer() {}
   FeedforwardLayer(int input_size,
-		   int hidden_size) {
+                   int hidden_size) {
     activation_function_ = ActivationFunctions::TANH;
     input_size_ = input_size;
     hidden_size_ = hidden_size;
@@ -270,6 +329,18 @@ class FeedforwardLayer : public Layer {
 
     weight_names->push_back("Wxh");
     bias_names->push_back("bh");
+  }
+
+  double GetUniformInitializationLimit(Matrix *W) {
+    int num_outputs = W->rows();
+    int num_inputs = W->cols();
+    double coeff;
+    if (activation_function_ == ActivationFunctions::LOGISTIC) {
+      coeff = 4.0;
+    } else {
+      coeff = 1.0;
+    }
+    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
   }
 
   void ResetGradients() {
@@ -373,6 +444,18 @@ class RNNLayer : public Layer {
     }
   }
 
+  double GetUniformInitializationLimit(Matrix *W) {
+    int num_outputs = W->rows();
+    int num_inputs = W->cols();
+    double coeff;
+    if (activation_function_ == ActivationFunctions::LOGISTIC) {
+      coeff = 4.0;
+    } else {
+      coeff = 1.0;
+    }
+    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
+  }
+
   void ResetGradients() {
     dWxh_.setZero(hidden_size_, input_size_);
     dbh_.setZero(hidden_size_);
@@ -462,8 +545,8 @@ class AttentionLayer : public Layer {
  public:
   AttentionLayer() {}
   AttentionLayer(int input_size,
-		 int control_size,
-		 int hidden_size) {
+                 int control_size,
+                 int hidden_size) {
     activation_function_ = ActivationFunctions::TANH;
     input_size_ = input_size;
     control_size_ = control_size;
@@ -493,11 +576,23 @@ class AttentionLayer : public Layer {
     bias_names->push_back("wzp");
   }
 
+  double GetUniformInitializationLimit(Matrix *W) {
+    int num_outputs = W->rows();
+    int num_inputs = W->cols();
+    double coeff;
+    if (activation_function_ == ActivationFunctions::LOGISTIC) {
+      coeff = 4.0;
+    } else {
+      coeff = 1.0;
+    }
+    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
+  }
+
   void ResetGradients() {
     dWxz_.setZero(hidden_size_, input_size_);
     dWyz_.setZero(hidden_size_, control_size_);
     dbz_.setZero(hidden_size_);
-    wzp_.setZero(hidden_size_);
+    dwzp_.setZero(hidden_size_);
   }
 
   virtual void RunForward() {
@@ -532,7 +627,7 @@ class AttentionLayer : public Layer {
     Vector Jdp = p_.array() * (dp_.array() - val);
     dz_ = wzp_ * Jdp.transpose();
 
-    Matrix dzraw;
+    Matrix dzraw = Matrix::Zero(hidden_size_, length);
     for (int t = 0; t < length; ++t) {
       Matrix result; // TODO: perform this in a matrix-level way to be more efficient.
       DerivateActivation(activation_function_, z_.col(t), &result);
@@ -545,7 +640,7 @@ class AttentionLayer : public Layer {
     *dx_ += du_ * p_.transpose();
     *dy_ += Wyz_.transpose() * dzraw_sum;
 
-    dwzp_ += z_ * Jdp.transpose();
+    dwzp_ += z_ * Jdp;
     dWxz_.noalias() += dzraw * (*x_).transpose();
     dWyz_.noalias() += dzraw_sum * (*y_).transpose();
     dbz_.noalias() += dzraw_sum;

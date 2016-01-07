@@ -79,55 +79,15 @@ class RNN {
 
   void InitializeParameters() {
     srand(1234);
-    std::vector<Matrix*> weights;
-    std::vector<Vector*> biases;
-    std::vector<std::string> weight_names;
-    std::vector<std::string> bias_names;
-    CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
 
-    bool read_from_file = false;
-    if (read_from_file) {
-      for (int i = 0; i < biases.size(); ++i) {
-        auto b = biases[i];
-        auto name = bias_names[i];
-        std::cout << "Loading " << name << "..." << std::endl;
-        LoadVectorParameter(name, b);
-      }
-      for (int i = 0; i < weights.size(); ++i) {
-        auto W = weights[i];
-        auto name = weight_names[i];
-        std::cout << "Loading " << name << "..." << std::endl;
-        LoadMatrixParameter(name, W);
-      }
-      return;
+    lookup_layer_->InitializeParameters();
+    linear_layer_->InitializeParameters();
+    rnn_layer_->InitializeParameters();
+    if (use_attention_) {
+      attention_layer_->InitializeParameters();
+      feedforward_layer_->InitializeParameters();
     }
-
-    for (auto b: biases) {
-      b->setZero();
-    }
-    for (auto W: weights) {
-      int num_outputs = W->rows();
-      int num_inputs = W->cols();
-      double coeff;
-      if (activation_function_ == ActivationFunctions::LOGISTIC) {
-        coeff = 4.0;
-      } else {
-        coeff = 1.0;
-      }
-      // if (num_inputs > 34000) {
-      //   num_inputs = 2896;
-      //   std::cout << "Changing number of inputs to " << num_inputs << std::endl;
-      // }
-      double max = coeff * sqrt(6.0 / (num_inputs + num_outputs));
-      for (int i = 0; i < W->rows(); ++i) {
-        for (int j = 0; j < W->cols(); ++j) {
-          double t = max *
-            (2.0*static_cast<double>(rand()) / RAND_MAX - 1.0);
-          (*W)(i, j) = t;
-          //std::cout << t/max << std::endl;
-        }
-      }
-    }
+    output_layer_->InitializeParameters();
   }
 
   void SetFixedEmbeddings(const Matrix &fixed_embeddings,
@@ -235,6 +195,14 @@ class RNN {
   }
 
   virtual void RunForwardPass(const std::vector<Input> &input_sequence) {
+    // Look for the separator symbol.
+    int wid_sep = dictionary_->GetWordId("__START__");
+    int separator = -1;
+    for (separator = 0; separator < input_sequence.size(); ++separator) {
+      if (input_sequence[separator].wid() == wid_sep) break;
+    }
+    assert(separator < input_sequence.size());
+
     lookup_layer_->set_input_sequence(input_sequence);
     lookup_layer_->RunForward();
 
@@ -247,16 +215,8 @@ class RNN {
     int t = input_sequence.size() - 1;
     Vector hnext = rnn_layer_->get_h().col(t);
 
-    // Look for the separator symbol.
-    int wid_sep = dictionary_->GetWordId("__START__");
-    int separator = -1;
-    for (separator = 0; separator < input_sequence.size(); ++separator) {
-      if (input_sequence[separator].wid() == wid_sep) break;
-    }
-    assert(separator < input_sequence.size());
     if (use_attention_) {
       Matrix premise_states = rnn_layer_->get_h().leftCols(separator);
-      
       attention_layer_->set_x(premise_states);
       attention_layer_->set_y(hnext);
       attention_layer_->RunForward();
@@ -265,7 +225,7 @@ class RNN {
       Matrix concatenated_states = Matrix::Zero(2*hidden_size_, 1);
       concatenated_states.block(0, 0, hidden_size_, 1) = attention_layer_->get_u();
       concatenated_states.block(hidden_size_, 0, hidden_size_, 1) = hnext;
-      feedforward_layer_->set_x(concatenated_states); 
+      feedforward_layer_->set_x(concatenated_states);
       feedforward_layer_->RunForward();
 
       hnext = feedforward_layer_->get_h();
@@ -294,25 +254,78 @@ class RNN {
   virtual void RunBackwardPass(const std::vector<Input> &input_sequence,
                                int output_label,
                                double learning_rate) {
+    // Look for the separator symbol.
+    int wid_sep = dictionary_->GetWordId("__START__");
+    int separator = -1;
+    for (separator = 0; separator < input_sequence.size(); ++separator) {
+      if (input_sequence[separator].wid() == wid_sep) break;
+    }
+    assert(separator < input_sequence.size());
+
     int t = input_sequence.size() - 1;
 
     output_layer_->ResetGradients();
     rnn_layer_->ResetGradients();
     linear_layer_->ResetGradients();
     lookup_layer_->ResetGradients();
+    if (use_attention_) {
+      feedforward_layer_->ResetGradients();
+      attention_layer_->ResetGradients();
+    }
 
     //std::cout << "p[0] = " << output_layer_->GetProbabilities()[0] << std::endl;
     output_layer_->set_output_label(output_label);
 
-    Matrix *dh = rnn_layer_->get_mutable_dh();
-    dh->setZero(hidden_size_, input_sequence.size());
-    Vector dhnext = Vector::Zero(hidden_size_);
-    output_layer_->set_dh(&dhnext);
     Vector hnext = rnn_layer_->get_h().col(t);
-    output_layer_->set_h(hnext);
-    output_layer_->RunBackward();
-    //std::cout << "dhnext[0] = " << dhnext(0) << std::endl;
-    dh->col(t) = dhnext;
+
+    if (use_attention_) {
+      Matrix premise_states = rnn_layer_->get_h().leftCols(separator);
+      attention_layer_->set_x(premise_states);
+      attention_layer_->set_y(hnext);
+
+      Vector dhh = Vector::Zero(hidden_size_);
+      output_layer_->set_dh(&dhh);
+      output_layer_->set_h(feedforward_layer_->get_h());
+      output_layer_->RunBackward();
+      Matrix *dhm = feedforward_layer_->get_mutable_dh();
+      dhm->setZero(hidden_size_, 1);
+      dhm->col(0) += dhh;
+
+      // Concatenate du and dhnext.
+      Matrix dc = Matrix::Zero(2*hidden_size_, 1);
+      feedforward_layer_->set_dx(&dc);
+      // Concatebate u and hnext.
+      Matrix concatenated_states = Matrix::Zero(2*hidden_size_, 1);
+      concatenated_states.block(0, 0, hidden_size_, 1) =
+        attention_layer_->get_u();
+      concatenated_states.block(hidden_size_, 0, hidden_size_, 1) = hnext;
+      feedforward_layer_->set_x(concatenated_states);
+      feedforward_layer_->RunBackward();
+
+      Vector *du = attention_layer_->get_mutable_du();
+      du->setZero(hidden_size_);
+      (*du) += dc.block(0, 0, hidden_size_, 1);
+      Matrix *dh = rnn_layer_->get_mutable_dh();
+      dh->setZero(hidden_size_, input_sequence.size());
+      dh->col(t) += dc.block(hidden_size_, 0, hidden_size_, 1);
+
+      Matrix dps = Matrix::Zero(hidden_size_, separator);
+      Vector dhnext = Vector::Zero(hidden_size_);
+      attention_layer_->set_dx(&dps);
+      attention_layer_->set_dy(&dhnext);
+      attention_layer_->RunBackward();
+      dh->leftCols(separator) += dps;
+      dh->col(t) += dhnext;
+    } else {
+      Matrix *dh = rnn_layer_->get_mutable_dh();
+      dh->setZero(hidden_size_, input_sequence.size());
+      Vector dhnext = Vector::Zero(hidden_size_);
+      output_layer_->set_dh(&dhnext);
+      output_layer_->set_h(hnext);
+      output_layer_->RunBackward();
+      dh->col(t) += dhnext;
+    }
+
     //output_layer_->UpdateParameters(learning_rate);
 
     Matrix *dx = linear_layer_->get_mutable_dy();
@@ -333,6 +346,10 @@ class RNN {
     //lookup_layer_->UpdateParameters(learning_rate);
 
     output_layer_->UpdateParameters(learning_rate);
+    if (use_attention_) {
+      feedforward_layer_->UpdateParameters(learning_rate);
+      attention_layer_->UpdateParameters(learning_rate);
+    }
     rnn_layer_->UpdateParameters(learning_rate);
     linear_layer_->UpdateParameters(learning_rate);
     lookup_layer_->UpdateParameters(learning_rate);
