@@ -69,6 +69,24 @@ class Layer {
   virtual void RunForward() = 0;
   virtual void RunBackward() = 0;
   virtual void UpdateParameters(double learning_rate) = 0;
+
+  int GetNumInputs() const { return inputs_.size(); }
+  void SetNumInputs(int n) {
+    inputs_.resize(n);
+    input_derivatives_.resize(n);
+  }
+  void SetInput(int i, const Matrix &input) { inputs_[i] = &input; }
+  const Matrix &GetOutput() const { return output_; }
+  void SetInputDerivative(int i, Matrix *input_derivative) {
+    input_derivatives_[i] = input_derivative;
+  }
+  Matrix *GetOutputDerivative() { return &output_derivative_; }
+
+ public:
+  std::vector<const Matrix*> inputs_;
+  Matrix output_;
+  std::vector<Matrix*> input_derivatives_;
+  Matrix output_derivative_;
 };
 
 class SelectorLayer {
