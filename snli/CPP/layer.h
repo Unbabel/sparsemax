@@ -680,7 +680,7 @@ class RNNLayer : public Layer {
     }
   }
 
-  double GetUniformInitializationLimit(Matrix *W) {
+  virtual double GetUniformInitializationLimit(Matrix *W) {
     int num_outputs = W->rows();
     int num_inputs = W->cols();
     double coeff;
@@ -692,7 +692,7 @@ class RNNLayer : public Layer {
     return coeff * sqrt(6.0 / (num_inputs + num_outputs));
   }
 
-  void ResetGradients() {
+  virtual void ResetGradients() {
     dWxh_.setZero(hidden_size_, input_size_);
     dbh_.setZero(hidden_size_);
     dWhh_.setZero(hidden_size_, hidden_size_);
@@ -702,6 +702,7 @@ class RNNLayer : public Layer {
   }
 
   virtual void RunForward() {
+#if 0
     int length = (*x_).cols();
     h_.setZero(hidden_size_, length);
     Vector hprev = Vector::Zero(h_.rows());
@@ -714,9 +715,25 @@ class RNNLayer : public Layer {
       h_.col(t) = result;
       hprev = h_.col(t);
     }
+#else
+    int length = (*x_).cols();
+    h_.setZero(hidden_size_, length);
+    Matrix hraw = (Wxh_ * (*x_)).colwise() + bh_;
+    Vector hprev = Vector::Zero(h_.rows());
+    if (use_hidden_start_) hprev = h0_;
+    Vector result;
+    for (int t = 0; t < length; ++t) {
+      EvaluateActivation(activation_function_,
+                         hraw.col(t) + Whh_ * hprev,
+                         &result);
+      h_.col(t) = result;
+      hprev = h_.col(t);
+    }
+#endif
   }
 
   virtual void RunBackward() {
+#if 0
     Vector dhnext = Vector::Zero(Whh_.rows());
     const Matrix &dy = dh_; // Just to avoid messing up the names.
 
@@ -739,9 +756,31 @@ class RNNLayer : public Layer {
     }
 
     dh0_.noalias() += dhnext;
+#else
+    Vector dhnext = Vector::Zero(Whh_.rows());
+    const Matrix &dy = dh_; // Just to avoid messing up the names.
+
+    Matrix dhraw;
+    DerivateActivation(activation_function_, h_, &dhraw);
+
+    int length = dy.cols();
+    for (int t = length - 1; t >= 0; --t) {
+      Vector dh = dy.col(t) + dhnext; // Backprop into h.
+      dhraw.col(t) = dhraw.col(t).array() * dh.array();
+      dhnext.noalias() = Whh_.transpose() * dhraw.col(t);
+    }
+
+    (*dx_) += Wxh_.transpose() * dhraw; // Backprop into x.
+
+    dWxh_.noalias() += dhraw * x_->transpose();
+    dbh_.noalias() += dhraw.rowwise().sum();
+    dWhh_.noalias() += dhraw.rightCols(length-1) *
+      h_.leftCols(length-1).transpose();
+    dh0_.noalias() += dhnext;
+#endif
   }
 
-  void UpdateParameters(double learning_rate) {
+  virtual void UpdateParameters(double learning_rate) {
     Wxh_ -= learning_rate * dWxh_;
     bh_ -= learning_rate * dbh_;
     Whh_ -= learning_rate * dWhh_;
@@ -775,6 +814,192 @@ class RNNLayer : public Layer {
   Matrix h_; // Output.
   Matrix *dx_;
   Matrix dh_;
+};
+
+class GRULayer : public RNNLayer {
+ public:
+  GRULayer() {}
+  GRULayer(int input_size,
+           int hidden_size) {
+    activation_function_ = ActivationFunctions::TANH;
+    input_size_ = input_size;
+    hidden_size_ = hidden_size;
+    use_hidden_start_ = true;
+  }
+  virtual ~GRULayer() {}
+
+  virtual void CollectAllParameters(std::vector<Matrix*> *weights,
+                                    std::vector<Vector*> *biases,
+                                    std::vector<std::string> *weight_names,
+                                    std::vector<std::string> *bias_names) {
+    RNNLayer::CollectAllParameters(weights, biases, weight_names, bias_names);
+
+    Wxz_ = Matrix::Zero(hidden_size_, input_size_);
+    Whz_ = Matrix::Zero(hidden_size_, hidden_size_);
+    Wxr_ = Matrix::Zero(hidden_size_, input_size_);
+    Whr_ = Matrix::Zero(hidden_size_, hidden_size_);
+    bz_ = Vector::Zero(hidden_size_);
+    br_ = Vector::Zero(hidden_size_);
+
+    weights->push_back(&Wxz_);
+    weights->push_back(&Whz_);
+    weights->push_back(&Wxr_);
+    weights->push_back(&Whr_);
+
+    biases->push_back(&bz_);
+    biases->push_back(&br_);
+
+    weight_names->push_back("Wxz");
+    weight_names->push_back("Whz");
+    weight_names->push_back("Wxr");
+    weight_names->push_back("Whr");
+
+    bias_names->push_back("bz");
+    bias_names->push_back("br");
+  }
+
+  double GetUniformInitializationLimit(Matrix *W) {
+    int num_outputs = W->rows();
+    int num_inputs = W->cols();
+    double coeff;
+    // Weights controlling gates have logistic activations.
+    if (activation_function_ == ActivationFunctions::LOGISTIC ||
+        W == &Wxz_ || W == &Whz_ || W == &Wxr_ || W == &Whr_) {
+      coeff = 4.0;
+    } else {
+      coeff = 1.0;
+    }
+    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
+  }
+
+  void ResetGradients() {
+    RNNLayer::ResetGradients();
+    dWxz_.setZero(hidden_size_, input_size_);
+    dWhz_.setZero(hidden_size_, hidden_size_);
+    dWxr_.setZero(hidden_size_, input_size_);
+    dWhr_.setZero(hidden_size_, hidden_size_);
+    dbz_.setZero(hidden_size_);
+    dbr_.setZero(hidden_size_);
+  }
+
+  void RunForward() {
+    int length = (*x_).cols();
+    z_.setZero(hidden_size_, length);
+    r_.setZero(hidden_size_, length);
+    hu_.setZero(hidden_size_, length);
+    h_.setZero(hidden_size_, length);
+    Matrix zraw = (Wxz_ * (*x_)).colwise() + bz_;
+    Matrix rraw = (Wxr_ * (*x_)).colwise() + br_;
+    Matrix hraw = (Wxh_ * (*x_)).colwise() + bh_;
+    Vector hprev = Vector::Zero(h_.rows());
+    if (use_hidden_start_) hprev = h0_;
+    Vector result;
+    for (int t = 0; t < length; ++t) {
+      EvaluateActivation(ActivationFunctions::LOGISTIC,
+                         zraw.col(t) + Whz_ * hprev,
+                         &result);
+      z_.col(t) = result;
+
+      EvaluateActivation(ActivationFunctions::LOGISTIC,
+                         rraw.col(t) + Whr_ * hprev,
+                         &result);
+      r_.col(t) = result;
+
+      EvaluateActivation(activation_function_,
+                         hraw.col(t) + Whh_ * r_.col(t).cwiseProduct(hprev),
+                         &result);
+      hu_.col(t) = result;
+      h_.col(t) = z_.col(t).cwiseProduct(hu_.col(t) - hprev) + hprev;
+      hprev = h_.col(t);
+    }
+  }
+
+  void RunBackward() {
+    Vector dhnext = Vector::Zero(Whh_.rows());
+    const Matrix &dy = dh_; // Just to avoid messing up the names.
+
+    Matrix dhuraw;
+    DerivateActivation(activation_function_, hu_, &dhuraw);
+    Matrix dzraw;
+    DerivateActivation(ActivationFunctions::LOGISTIC, z_, &dzraw);
+    Matrix drraw;
+    DerivateActivation(ActivationFunctions::LOGISTIC, r_, &drraw);
+
+    int length = dy.cols();
+    for (int t = length - 1; t >= 0; --t) {
+      Vector dh = dy.col(t) + dhnext; // Backprop into h.
+      Vector dhu = z_.col(t).cwiseProduct(dh);
+
+      dhuraw.col(t) = dhuraw.col(t).cwiseProduct(dhu);
+      Vector hprev;
+      if (t == 0) {
+        hprev = Vector::Zero(h_.rows());
+      } else {
+        hprev = h_.col(t-1);
+      }
+
+      Vector dq = Whh_.transpose() * dhuraw.col(t);
+      Vector dz = (hu_.col(t) - hprev).cwiseProduct(dh);
+      Vector dr = hprev.cwiseProduct(dq);
+
+      dzraw.col(t) = dzraw.col(t).cwiseProduct(dz);
+      drraw.col(t) = drraw.col(t).cwiseProduct(dr);
+
+      dhnext.noalias() =
+        Whz_.transpose() * dzraw.col(t) +
+        Whr_.transpose() * drraw.col(t) +
+        r_.col(t).cwiseProduct(dq) +
+        (1.0 - z_.col(t).array()).matrix().cwiseProduct(dh);
+    }
+
+    (*dx_) += Wxz_.transpose() * dzraw + Wxr_.transpose() * drraw +
+      Wxh_.transpose() * dhuraw; // Backprop into x.
+
+    dWxz_.noalias() += dzraw * x_->transpose();
+    dbz_.noalias() += dzraw.rowwise().sum();
+    dWxr_.noalias() += drraw * x_->transpose();
+    dbr_.noalias() += drraw.rowwise().sum();
+    dWxh_.noalias() += dhuraw * x_->transpose();
+    dbh_.noalias() += dhuraw.rowwise().sum();
+
+    dWhz_.noalias() += dzraw.rightCols(length-1) *
+      h_.leftCols(length-1).transpose();
+    dWhr_.noalias() += drraw.rightCols(length-1) *
+      h_.leftCols(length-1).transpose();
+    dWhh_.noalias() += dhuraw.rightCols(length-1) *
+      ((r_.rightCols(length-1)).cwiseProduct(h_.leftCols(length-1))).transpose();
+
+    dh0_.noalias() += dhnext;
+  }
+
+  void UpdateParameters(double learning_rate) {
+    RNNLayer::UpdateParameters(learning_rate);
+    Wxz_ -= learning_rate * dWxz_;
+    Whz_ -= learning_rate * dWhz_;
+    Wxr_ -= learning_rate * dWxr_;
+    Whr_ -= learning_rate * dWhr_;
+    bz_ -= learning_rate * dbz_;
+    br_ -= learning_rate * dbr_;
+  }
+
+ protected:
+  Matrix Wxz_;
+  Matrix Whz_;
+  Matrix Wxr_;
+  Matrix Whr_;
+  Vector bz_;
+  Vector br_;
+
+  Matrix dWxz_;
+  Matrix dWhz_;
+  Matrix dWxr_;
+  Matrix dWhr_;
+  Vector dbz_;
+  Vector dbr_;
+
+  Matrix z_;
+  Matrix r_;
+  Matrix hu_;
 };
 
 class AttentionLayer : public Layer {

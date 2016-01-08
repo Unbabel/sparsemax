@@ -17,7 +17,7 @@ class RNN {
       int embedding_dimension,
       int hidden_size,
       int output_size) : dictionary_(dictionary) {
-    use_attention_ = false; //true;
+    use_attention_ = true; //false; //true;
     input_size_ = hidden_size; // Size of the projected embedded words.
     hidden_size_ = hidden_size;
     output_size_ = output_size;
@@ -25,7 +25,8 @@ class RNN {
     lookup_layer_ = new LookupLayer(dictionary->GetNumWords(),
                                     embedding_dimension);
     linear_layer_ = new LinearLayer(embedding_dimension, input_size_);
-    rnn_layer_ = new RNNLayer(input_size_, hidden_size);
+    //rnn_layer_ = new RNNLayer(input_size_, hidden_size);
+    rnn_layer_ = new GRULayer(input_size_, hidden_size);
     if (use_attention_) {
       attention_layer_ = new AttentionLayer(hidden_size, hidden_size, hidden_size);
     } else {
