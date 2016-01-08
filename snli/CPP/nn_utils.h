@@ -138,14 +138,34 @@ void DerivateActivation(int activation_function, const Vector &dh,
   }
 }
 
-double LogSumExp(const Vector &x) {
+float LogSumExp(const Vector &x) {
 #if 0
   //return log(x.unaryExpr(std::ptr_fun(exp)).sum());
   return log(x.array().exp().sum());
 #else
-  double xmax = x.maxCoeff();
+  float xmax = x.maxCoeff();
   return xmax + log((x.array() - xmax).exp().sum());
 #endif
+}
+
+void ProjectOntoSimplex(const Vector &x, double r, Vector *p, float *tau) {
+  int j;
+  int d = x.size();
+  float s = x.sum();
+  *p = x;
+  std::sort(p->data(), p->data() + d);
+  for (j = 0; j < d; j++) {
+    *tau = (s - r) / ((double) (d - j));
+    if ((*p)[j] > *tau) break;
+    s -= (*p)[j];
+  }
+  for (j = 0; j < d; j++) {
+    if (x[j] < *tau) {
+      (*p)[j] = 0.0;
+    } else {
+      (*p)[j] -= *tau;
+    }
+  }
 }
 
 #endif /* NN_UTILS_H_ */

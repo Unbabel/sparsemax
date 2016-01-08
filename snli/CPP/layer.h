@@ -416,7 +416,7 @@ class SoftmaxOutputLayer : public Layer {
 
   void RunForward() {
     y_ = Why_ * (*h_) + by_;
-    double logsum = LogSumExp(y_);
+    float logsum = LogSumExp(y_);
     p_ = (y_.array() - logsum).exp();
   }
 
@@ -1007,11 +1007,13 @@ class AttentionLayer : public Layer {
   AttentionLayer() {}
   AttentionLayer(int input_size,
                  int control_size,
-                 int hidden_size) {
+                 int hidden_size,
+		 bool use_sparsemax) {
     activation_function_ = ActivationFunctions::TANH;
     input_size_ = input_size;
     control_size_ = control_size;
     hidden_size_ = hidden_size;
+    use_sparsemax_ = use_sparsemax;
   }
   virtual ~AttentionLayer() {}
 
@@ -1069,9 +1071,13 @@ class AttentionLayer : public Layer {
     }
 
     Vector v = z_.transpose() * wzp_;
-    double logsum = LogSumExp(v);
-    //p_.noalias() = (v.array() - logsum).exp();
-    p_ = (v.array() - logsum).exp();
+    if (use_sparsemax_) {
+      float tau;
+      ProjectOntoSimplex(v, 1.0, &p_, &tau);
+    } else {
+      float logsum = LogSumExp(v);
+      p_ = (v.array() - logsum).exp();
+    }
     u_.noalias() = (*x_) * p_;
   }
 
@@ -1079,13 +1085,43 @@ class AttentionLayer : public Layer {
     int length = (*x_).cols();
     dp_.noalias() = (*x_).transpose() * du_;
 
-    // Compute Jsoftmax * dp_.
-    // Jsoftmax = diag(p_) - p_*p_.transpose().
-    // Jsoftmax * dp_ = p_.array() * dp_.array() - p_* (p_.transpose() * dp_).
-    //                = p_.array() * (dp_ - val).array(),
-    // where val = p_.transpose() * dp_.
-    float val = p_.transpose() * dp_;
-    Vector Jdp = p_.array() * (dp_.array() - val);
+    Vector Jdp;
+    if (use_sparsemax_) {
+      // Compute Jparsemax * dp_.
+      // Let s = supp(p_) and k = sum(s).
+      // Jsparsemax = diag(s) - s*s.transpose() / k.
+      // Jsparsemax * dp_ = s.array() * dp_.array() - s*s.transpose() * dp_ / k
+      //                  = s.array() * dp_.array() - val * s,
+      // where val = s.transpose() * dp_ / k.
+      // 
+      // With array-indexing this would be:
+      //
+      // float val = dp_[mask].sum() / mask.size();
+      // Jdp[mask] = dp_[mask] - val;
+      int nnz = 0;
+      float val = 0.0;
+      for (int i = 0; i < p_.size(); ++i) {
+	if (p_[i] > 0.0) {
+	  val += dp_[i];
+	  ++nnz;
+	}
+      }
+      val /= static_cast<float>(nnz);
+      Jdp.setZero(p_.size());
+      for (int i = 0; i < p_.size(); ++i) {
+	if (p_[i] > 0.0) {
+	  Jdp[i] = dp_[i] - val;
+	}
+      }      
+    } else {
+      // Compute Jsoftmax * dp_.
+      // Jsoftmax = diag(p_) - p_*p_.transpose().
+      // Jsoftmax * dp_ = p_.array() * dp_.array() - p_* (p_.transpose() * dp_).
+      //                = p_.array() * (dp_ - val).array(),
+      // where val = p_.transpose() * dp_.
+      float val = p_.transpose() * dp_;
+      Jdp = p_.array() * (dp_.array() - val);
+    }
     dz_ = wzp_ * Jdp.transpose();
 
     Matrix dzraw = Matrix::Zero(hidden_size_, length);
@@ -1126,6 +1162,7 @@ class AttentionLayer : public Layer {
   int hidden_size_;
   int input_size_;
   int control_size_;
+  bool use_sparsemax_;
 
   Matrix Wxz_;
   Matrix Wyz_;

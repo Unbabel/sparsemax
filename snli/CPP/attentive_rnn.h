@@ -16,8 +16,11 @@ class RNN {
   RNN(Dictionary *dictionary,
       int embedding_dimension,
       int hidden_size,
-      int output_size) : dictionary_(dictionary) {
-    use_attention_ = true; //false; //true;
+      int output_size,
+      bool use_attention,
+      bool sparse_attention) : dictionary_(dictionary) {
+    use_attention_ = use_attention;
+    sparse_attention_ = sparse_attention;
     input_size_ = hidden_size; // Size of the projected embedded words.
     hidden_size_ = hidden_size;
     output_size_ = output_size;
@@ -28,7 +31,8 @@ class RNN {
     //rnn_layer_ = new RNNLayer(input_size_, hidden_size);
     rnn_layer_ = new GRULayer(input_size_, hidden_size);
     if (use_attention_) {
-      attention_layer_ = new AttentionLayer(hidden_size, hidden_size, hidden_size);
+      attention_layer_ = new AttentionLayer(hidden_size, hidden_size, hidden_size,
+					    sparse_attention_);
     } else {
       attention_layer_ = NULL;
     }
@@ -586,6 +590,7 @@ class RNN {
   int hidden_size_;
   int output_size_;
   bool use_attention_;
+  bool sparse_attention_;
 
   //Matrix x_;
   //Matrix h_;

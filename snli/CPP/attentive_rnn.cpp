@@ -111,12 +111,24 @@ int main(int argc, char** argv) {
   std::string dev_file = argv[2];
   std::string test_file = argv[3];
   std::string word_vector_file = argv[4];
-  int num_hidden_units = atoi(argv[5]);
-  int num_epochs = atoi(argv[6]);
-  double learning_rate = atof(argv[7]);
+  bool use_attention = static_cast<bool>(atoi(argv[5]));
+  bool sparse_attention = static_cast<bool>(atoi(argv[6]));
+  int num_hidden_units = atoi(argv[7]);
+  int num_epochs = atoi(argv[8]);
+  double learning_rate = atof(argv[9]);
 
   int embedding_dimension = 300; //64;
   int word_cutoff = 1;
+
+  if (use_attention) {
+    if (sparse_attention) {
+      std::cout << "Using sparse-max attention." << std::endl;
+    } else {
+      std::cout << "Using soft-max attention." << std::endl;
+    }
+  } else {
+    std::cout << "Not using attention." << std::endl;
+  }
 
   Dictionary dictionary;
   dictionary.Clear();
@@ -158,7 +170,8 @@ int main(int argc, char** argv) {
 
   //BiRNN_GRU
   RNN rnn(&dictionary, embedding_dimension,
-          num_hidden_units, dictionary.GetNumLabels());
+          num_hidden_units, dictionary.GetNumLabels(),
+	  use_attention, sparse_attention);
   rnn.InitializeParameters();
   rnn.SetFixedEmbeddings(fixed_embeddings, word_ids);
   rnn.Train(input_sequences, output_labels,
