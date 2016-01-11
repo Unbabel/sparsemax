@@ -2,7 +2,10 @@
 #define NN_UTILS_H_
 
 #include <vector>
+#include <string>
 #include <cstdlib>
+#include <iostream>
+#include <fstream>
 #include <Eigen/Dense>
 #include <cmath>
 #include "utils.h"

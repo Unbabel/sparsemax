@@ -400,19 +400,20 @@ class RNN {
     // Check gradient.
     bool check_gradient = false; //true;
     int num_checks = 20;
+    double delta = 1e-7;
     if (check_gradient) {
       Matrix *output_derivative = output_layer_->GetOutputDerivative();
       const Matrix &output = output_layer_->GetOutput();
       output_derivative->setZero(output_size_, 1);
       int l = output_layer_->output_label();
       (*output_derivative)(l) = -1.0 / output(l);
-      output_layer_->CheckGradient(num_checks);
+      output_layer_->CheckGradient(num_checks, delta);
       if (use_attention_) {
-        attention_layer_->CheckGradient(num_checks);
+        attention_layer_->CheckGradient(num_checks, delta);
       }
-      feedforward_layer_->CheckGradient(num_checks);
-      rnn_layer_->CheckGradient(num_checks);
-      linear_layer_->CheckGradient(num_checks);
+      feedforward_layer_->CheckGradient(num_checks, delta);
+      rnn_layer_->CheckGradient(num_checks, delta);
+      linear_layer_->CheckGradient(num_checks, delta);
     }
 
     // Update parameters.

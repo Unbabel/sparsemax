@@ -2,6 +2,7 @@
 #define SNLI_DATA_H_
 
 #include <vector>
+#include <unordered_map>
 #include "utils.h"
 #include "nn_utils.h"
 

@@ -72,7 +72,7 @@ class Layer {
     }
   }
 
-  void CheckGradient(int num_checks) {
+  void CheckGradient(int num_checks, double delta) {
     std::vector<Matrix*> weights, weight_derivatives;
     std::vector<Vector*> biases, bias_derivatives;
     std::vector<std::string> weight_names;
@@ -89,7 +89,7 @@ class Layer {
               << std::endl;
     assert(output_.size() == output_derivative_.size());
 
-    float delta = 1e-3; //1e-5; //1e-5;
+    //float delta = 1e-3; //1e-5; //1e-5;
     for (int check = 0; check < num_checks; ++check) {
       for (int i = 0; i < biases.size(); ++i) {
         auto name = bias_names[i];
@@ -97,18 +97,18 @@ class Layer {
         auto db = bias_derivatives[i];
         int r = static_cast<int>(b->size() *
                                  static_cast<double>(rand()) / RAND_MAX);
-        float value = (*b)[r];
+        double value = (*b)[r];
         (*b)[r] = value + delta;
         RunForward();
-        float out0 = (output_.array() * output_derivative_.array()).sum();
+        double out0 = (output_.array() * output_derivative_.array()).sum();
         (*b)[r] = value - delta;
         RunForward();
-        float out1 = (output_.array() * output_derivative_.array()).sum();
+        double out1 = (output_.array() * output_derivative_.array()).sum();
         (*b)[r] = value; // Put the value back.
         RunForward();
-        float numeric_gradient = (out0 - out1) / (2 * delta);
-        float analytic_gradient = (*db)[r];
-        float relative_error = 0.0;
+        double numeric_gradient = (out0 - out1) / (2 * delta);
+        double analytic_gradient = (*db)[r];
+        double relative_error = 0.0;
         if (numeric_gradient + analytic_gradient != 0.0) {
           relative_error = fabs(numeric_gradient - analytic_gradient) /
             fabs(numeric_gradient + analytic_gradient);
@@ -124,19 +124,19 @@ class Layer {
         auto dW = weight_derivatives[i];
         int r = static_cast<int>(W->size() *
                                  static_cast<double>(rand()) / RAND_MAX);
-        float value = (*W)(r);
+        double value = (*W)(r);
         assert(output_.size() == output_derivative_.size());
         (*W)(r) = value + delta;
         RunForward();
-        float out0 = (output_.array() * output_derivative_.array()).sum();
+        double out0 = (output_.array() * output_derivative_.array()).sum();
         (*W)(r) = value - delta;
         RunForward();
-        float out1 = (output_.array() * output_derivative_.array()).sum();
+        double out1 = (output_.array() * output_derivative_.array()).sum();
         (*W)(r) = value; // Put the value back.
         RunForward();
-        float numeric_gradient = (out0 - out1) / (2 * delta);
-        float analytic_gradient = (*dW)(r);
-        float relative_error = 0.0;
+        double numeric_gradient = (out0 - out1) / (2 * delta);
+        double analytic_gradient = (*dW)(r);
+        double relative_error = 0.0;
         if (numeric_gradient + analytic_gradient != 0.0) {
           relative_error = fabs(numeric_gradient - analytic_gradient) /
             fabs(numeric_gradient + analytic_gradient);
@@ -225,26 +225,11 @@ class SelectorLayer : public Layer {
     num_columns_ = num_columns;
   }
 
-
-#if 0
-  void set_x(const Matrix &x) { x_ = &x; }
-  void set_dx(Matrix *dx) { dx_ = dx; }
-  const Matrix &get_y() { return y_; }
-  Matrix *get_mutable_dy() { return &dy_; }
-#endif
-
  protected:
   int first_row_;
   int first_column_;
   int num_rows_;
   int num_columns_;
-
-#if 0
-  const Matrix *x_; // Input.
-  Matrix y_; // Output.
-  Matrix *dx_;
-  Matrix dy_;
-#endif
 };
 
 class ConcatenatorLayer : public Layer {
@@ -292,25 +277,6 @@ class ConcatenatorLayer : public Layer {
   }
 
   void UpdateParameters(double learning_rate) {}
-
-#if 0
-  void set_x1(const Vector &x1) { x1_ = &x1; }
-  void set_x2(const Vector &x2) { x2_ = &x2; }
-  void set_dx1(Vector *dx1) { dx1_ = dx1; }
-  void set_dx2(Vector *dx2) { dx2_ = dx2; }
-  const Vector &get_y() { return y_; }
-  Vector *get_mutable_dy() { return &dy_; }
-#endif
-
-#if 0
- protected:
-  const Vector *x1_; // Input.
-  const Vector *x2_; // Input.
-  Vector y_; // Output.
-  Vector *dx1_;
-  Vector *dx2_;
-  Vector dy_;
-#endif
 };
 
 class LookupLayer : public Layer {
@@ -392,11 +358,6 @@ class LookupLayer : public Layer {
     input_sequence_ = &input_sequence;
   }
 
-#if 0
-  const Matrix &get_x() { return x_; }
-  Matrix *get_mutable_dx() { return &dx_; }
-#endif
-
  public:
   int num_words_;
   int embedding_dimension_;
@@ -404,10 +365,6 @@ class LookupLayer : public Layer {
   std::vector<bool> updatable_;
 
   const std::vector<Input> *input_sequence_; // Input.
-#if 0
-  Matrix x_; // Output.
-  Matrix dx_;
-#endif
 };
 
 class LinearLayer : public Layer {
@@ -475,13 +432,6 @@ class LinearLayer : public Layer {
     by_ -= learning_rate * dby_;
   }
 
-#if 0
-  void set_x(const Matrix &x) { x_ = &x; }
-  void set_dx(Matrix *dx) { dx_ = dx; }
-  const Matrix &get_y() { return y_; }
-  Matrix *get_mutable_dy() { return &dy_; }
-#endif
-
  protected:
   int input_size_;
   int output_size_;
@@ -490,28 +440,24 @@ class LinearLayer : public Layer {
 
   Matrix dWxy_;
   Vector dby_;
-
-#if 0
-  const Matrix *x_; // Input.
-  Matrix y_; // Output.
-  Matrix *dx_;
-  Matrix dy_;
-#endif
 };
 
 class SoftmaxOutputLayer : public Layer {
  public:
   SoftmaxOutputLayer() {}
-  SoftmaxOutputLayer(int hidden_size,
+  SoftmaxOutputLayer(int input_size,
                      int output_size) {
     name_ = "SoftmaxOutput";
-    hidden_size_ = hidden_size;
+    input_size_ = input_size;
     output_size_ = output_size;
   }
   virtual ~SoftmaxOutputLayer() {}
 
+  int input_size() const { return input_size_; }
+  int output_size() const { return output_size_; }
+
   void ResetParameters() {
-    Why_ = Matrix::Zero(output_size_, hidden_size_);
+    Why_ = Matrix::Zero(output_size_, input_size_);
     by_ = Vector::Zero(output_size_);
   }
 
@@ -540,7 +486,7 @@ class SoftmaxOutputLayer : public Layer {
   }
 
   void ResetGradients() {
-    dWhy_.setZero(output_size_, hidden_size_);
+    dWhy_.setZero(output_size_, input_size_);
     dby_.setZero(output_size_);
   }
 
@@ -575,15 +521,8 @@ class SoftmaxOutputLayer : public Layer {
     output_label_ = output_label;
   }
 
-#if 0
-  void set_h(const Vector &h) { h_ = &h; }
-  void set_dh(Vector *dh) { dh_ = dh; }
-  //const Vector &get_y() { return y_; } // remove.
-  const Vector &GetProbabilities() { return p_; }
-#endif
-
  protected:
-  int hidden_size_;
+  int input_size_;
   int output_size_;
 
   Matrix Why_;
@@ -593,30 +532,26 @@ class SoftmaxOutputLayer : public Layer {
   Vector dby_;
 
   int output_label_; // Output.
-
-#if 0
-  const Vector *h_; // Input.
-  Vector y_; // Output. (maybe this does not need to be used).
-  Vector p_; // Output.
-  Vector *dh_;
-#endif
 };
 
 class FeedforwardLayer : public Layer {
  public:
   FeedforwardLayer() {}
   FeedforwardLayer(int input_size,
-                   int hidden_size) {
+                   int output_size) {
     name_ = "Feedforward";
     activation_function_ = ActivationFunctions::TANH;
     input_size_ = input_size;
-    hidden_size_ = hidden_size;
+    output_size_ = output_size;
   }
   virtual ~FeedforwardLayer() {}
 
+  int input_size() const { return input_size_; }
+  int output_size() const { return output_size_; }
+
   void ResetParameters() {
-    Wxh_ = Matrix::Zero(hidden_size_, input_size_);
-    bh_ = Vector::Zero(hidden_size_);
+    Wxh_ = Matrix::Zero(output_size_, input_size_);
+    bh_ = Vector::Zero(output_size_);
   }
 
   void CollectAllParameters(std::vector<Matrix*> *weights,
@@ -649,8 +584,8 @@ class FeedforwardLayer : public Layer {
   }
 
   void ResetGradients() {
-    dWxh_.setZero(hidden_size_, input_size_);
-    dbh_.setZero(hidden_size_);
+    dWxh_.setZero(output_size_, input_size_);
+    dbh_.setZero(output_size_);
   }
 
   void RunForward() {
@@ -670,7 +605,8 @@ class FeedforwardLayer : public Layer {
     DerivateActivation(activation_function_, output_, &dhraw);
     dhraw = dhraw.array() * output_derivative_.array();
     dWxh_.noalias() += dhraw * x.transpose();
-    dbh_.noalias() += dhraw;
+    std::cout << dbh_.size() << " " << dhraw.size() << std::endl;
+    dbh_.noalias() += dhraw.rowwise().sum();
     *dx += Wxh_.transpose() * dhraw; // Backprop into x.
   }
 
@@ -679,16 +615,9 @@ class FeedforwardLayer : public Layer {
     bh_ -= learning_rate * dbh_;
   }
 
-#if 0
-  void set_x(const Vector &x) { x_ = &x; }
-  void set_dx(Vector *dx) { dx_ = dx; }
-  const Vector &get_h() { return h_; }
-  Vector *get_mutable_dh() { return &dh_; }
-#endif
-
  protected:
   int activation_function_;
-  int hidden_size_;
+  int output_size_;
   int input_size_;
 
   Matrix Wxh_;
@@ -696,13 +625,6 @@ class FeedforwardLayer : public Layer {
 
   Matrix dWxh_;
   Vector dbh_;
-
-#if 0
-  const Vector *x_; // Input.
-  Vector h_; // Output.
-  Vector *dx_;
-  Vector dh_;
-#endif
 };
 
 class RNNLayer : public Layer {
@@ -717,6 +639,9 @@ class RNNLayer : public Layer {
     use_hidden_start_ = true;
   }
   virtual ~RNNLayer() {}
+
+  int input_size() const { return input_size_; }
+  int hidden_size() const { return hidden_size_; }
 
   virtual void ResetParameters() {
     Wxh_ = Matrix::Zero(hidden_size_, input_size_);
@@ -832,13 +757,6 @@ class RNNLayer : public Layer {
     }
   }
 
-#if 0
-  void set_x(const Matrix &x) { x_ = &x; }
-  void set_dx(Matrix *dx) { dx_ = dx; }
-  const Matrix &get_h() { return h_; }
-  Matrix *get_mutable_dh() { return &dh_; }
-#endif
-
  protected:
   int activation_function_;
   int hidden_size_;
@@ -854,13 +772,6 @@ class RNNLayer : public Layer {
   Matrix dWhh_;
   Vector dbh_;
   Vector dh0_;
-
-#if 0
-  const Matrix *x_; // Input.
-  Matrix h_; // Output.
-  Matrix *dx_;
-  Matrix dh_;
-#endif
 };
 
 class GRULayer : public RNNLayer {
@@ -1087,6 +998,10 @@ class AttentionLayer : public Layer {
     use_sparsemax_ = use_sparsemax;
   }
   virtual ~AttentionLayer() {}
+
+  int input_size() const { return input_size_; }
+  int control_size() const { return control_size_; }
+  int hidden_size() const { return hidden_size_; }
 
   void ResetParameters() {
     Wxz_ = Matrix::Zero(hidden_size_, input_size_);
