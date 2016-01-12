@@ -439,6 +439,7 @@ class RNN {
       feedforward_layer_->UpdateParametersADAM(learning_rate);
       rnn_layer_->UpdateParametersADAM(learning_rate);
       linear_layer_->UpdateParametersADAM(learning_rate);
+      //lookup_layer_->UpdateParameters(learning_rate);
     } else {
       output_layer_->UpdateParameters(learning_rate);
       if (use_attention_) {
