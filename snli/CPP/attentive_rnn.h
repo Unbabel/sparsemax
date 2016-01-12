@@ -19,6 +19,7 @@ class RNN {
       int output_size,
       bool use_attention,
       bool sparse_attention) : dictionary_(dictionary) {
+    use_ADAM_ = true;
     use_attention_ = use_attention;
     sparse_attention_ = sparse_attention;
     input_size_ = hidden_size; // Size of the projected embedded words.
@@ -107,6 +108,17 @@ class RNN {
     }
     feedforward_layer_->InitializeParameters();
     output_layer_->InitializeParameters();
+
+    if (use_ADAM_) {
+      double beta1 = 0.0; //0.9;
+      double beta2 = 0.999;
+      double epsilon = 1e-5; // 1e-8;
+      linear_layer_->InitializeADAM(beta1, beta2, epsilon);
+      rnn_layer_->InitializeADAM(beta1, beta2, epsilon);
+      if (use_attention_) attention_layer_->InitializeADAM(beta1, beta2, epsilon);
+      feedforward_layer_->InitializeADAM(beta1, beta2, epsilon);
+      output_layer_->InitializeADAM(beta1, beta2, epsilon);
+    }
   }
 
   void SetFixedEmbeddings(const FloatMatrix &fixed_embeddings,
@@ -419,14 +431,25 @@ class RNN {
     }
 
     // Update parameters.
-    output_layer_->UpdateParameters(learning_rate);
-    if (use_attention_) {
-      attention_layer_->UpdateParameters(learning_rate);
+    if (use_ADAM_) {
+      output_layer_->UpdateParametersADAM(learning_rate);
+      if (use_attention_) {
+	attention_layer_->UpdateParametersADAM(learning_rate);
+      }
+      feedforward_layer_->UpdateParametersADAM(learning_rate);
+      rnn_layer_->UpdateParametersADAM(learning_rate);
+      linear_layer_->UpdateParametersADAM(learning_rate);
+    } else {
+      output_layer_->UpdateParameters(learning_rate);
+      if (use_attention_) {
+	attention_layer_->UpdateParameters(learning_rate);
+      }
+      feedforward_layer_->UpdateParameters(learning_rate);
+      rnn_layer_->UpdateParameters(learning_rate);
+      linear_layer_->UpdateParameters(learning_rate);
+
+      lookup_layer_->UpdateParameters(learning_rate);
     }
-    feedforward_layer_->UpdateParameters(learning_rate);
-    rnn_layer_->UpdateParameters(learning_rate);
-    linear_layer_->UpdateParameters(learning_rate);
-    lookup_layer_->UpdateParameters(learning_rate);
   }
 
  protected:
@@ -447,6 +470,7 @@ class RNN {
   int output_size_;
   bool use_attention_;
   bool sparse_attention_;
+  bool use_ADAM_;
 
   //FloatMatrix x_;
   //FloatMatrix h_;

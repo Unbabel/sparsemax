@@ -14,8 +14,17 @@
 
 template<typename Real> class Layer {
  public:
-  Layer() {};
-  ~Layer() {};
+  Layer() {}
+  ~Layer() {
+    for (int i = 0; i < first_bias_moments_.size(); ++i) {
+      delete first_bias_moments_[i];
+      delete second_bias_moments_[i];
+    }
+    for (int i = 0; i < first_weight_moments_.size(); ++i) {
+      delete first_weight_moments_[i];
+      delete second_weight_moments_[i];
+    }
+  }
 
   virtual void ResetParameters() = 0;
 
@@ -29,6 +38,123 @@ template<typename Real> class Layer {
       std::vector<Vector<Real>*> *bias_derivatives) = 0;
 
   virtual double GetUniformInitializationLimit(Matrix<Real> *W) = 0;
+
+  virtual void UpdateParameters(double learning_rate) {
+    std::vector<Matrix<Real>*> weights, weight_derivatives;
+    std::vector<Vector<Real>*> biases, bias_derivatives;
+    std::vector<std::string> weight_names;
+    std::vector<std::string> bias_names;
+    CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
+    CollectAllParameterDerivatives(&weight_derivatives, &bias_derivatives);
+
+    for (int i = 0; i < biases.size(); ++i) {
+      auto b = biases[i];
+      auto db = bias_derivatives[i];
+      *b -= learning_rate * (*db);
+    }
+
+    for (int i = 0; i < weights.size(); ++i) {
+      auto W = weights[i];
+      auto dW = weight_derivatives[i];
+      *W -= learning_rate * (*dW);
+    }
+  }
+
+  void InitializeADAM(double beta1, double beta2, double epsilon) {
+    beta1_ = beta1;
+    beta2_ = beta2;
+    epsilon_ = epsilon;
+    iteration_number_ = 0;
+
+    std::vector<Matrix<Real>*> weights;
+    std::vector<Vector<Real>*> biases;
+    std::vector<std::string> weight_names;
+    std::vector<std::string> bias_names;
+    CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
+
+    first_bias_moments_.resize(biases.size());
+    second_bias_moments_.resize(biases.size());
+    for (int i = 0; i < biases.size(); ++i) {
+      auto b = biases[i];
+      first_bias_moments_[i] = new Vector<Real>;
+      first_bias_moments_[i]->setZero(b->size());
+      second_bias_moments_[i] = new Vector<Real>;
+      second_bias_moments_[i]->setZero(b->size());
+    }
+
+    first_weight_moments_.resize(weights.size());
+    second_weight_moments_.resize(weights.size());
+    for (int i = 0; i < weights.size(); ++i) {
+      auto W = weights[i];
+      first_weight_moments_[i] = new Matrix<Real>;
+      first_weight_moments_[i]->setZero(W->rows(), W->cols());
+      second_weight_moments_[i] = new Matrix<Real>;
+      second_weight_moments_[i]->setZero(W->rows(), W->cols());
+    }
+  }
+
+  void UpdateParametersADAM(double learning_rate) {
+    std::vector<Matrix<Real>*> weights, weight_derivatives;
+    std::vector<Vector<Real>*> biases, bias_derivatives;
+    std::vector<std::string> weight_names;
+    std::vector<std::string> bias_names;
+    CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
+    CollectAllParameterDerivatives(&weight_derivatives, &bias_derivatives);
+
+    for (int i = 0; i < biases.size(); ++i) {
+      auto b = biases[i];
+      auto db = bias_derivatives[i];
+
+      auto mb = first_bias_moments_[i];
+      auto vb = second_bias_moments_[i];
+
+#if 1
+      *mb = beta1_ * (*mb) + (1.0 - beta1_) * (*db);
+      *vb = beta2_ * vb->array() + (1.0 - beta2_) * (db->array() * db->array());
+      auto mb_corrected = (*mb) / (1.0 - pow(beta1_, iteration_number_ + 1));
+      auto vb_corrected = (*vb) / (1.0 - pow(beta2_, iteration_number_ + 1));
+
+      //*b = b->array() - learning_rate * mb_corrected.array() / (epsilon_ + vb_corrected.array().sqrt());
+      double stepsize = learning_rate; // / sqrt(static_cast<double>(iteration_number_ + 1));
+      *b = b->array() - stepsize * mb_corrected.array() / (epsilon_ + vb_corrected.array().sqrt());
+#else
+      // Adagrad.
+      *vb = vb->array() + (db->array() * db->array());
+      //std::cout << epsilon_ + vb->array().sqrt() << std::endl;
+      *b = b->array() - learning_rate * db->array() / (epsilon_ + vb->array().sqrt());
+      //*b = b->array() - learning_rate * db->array();
+#endif
+
+    }
+
+    for (int i = 0; i < weights.size(); ++i) {
+      auto W = weights[i];
+      auto dW = weight_derivatives[i];
+
+      auto mW = first_weight_moments_[i];
+      auto vW = second_weight_moments_[i];
+
+#if 1
+      *mW = beta1_ * (*mW) + (1.0 - beta1_) * (*dW);
+      *vW = beta2_ * vW->array() + (1.0 - beta2_) * (dW->array() * dW->array());
+      auto mW_corrected = (*mW) / (1.0 - pow(beta1_, iteration_number_ + 1));
+      auto vW_corrected = (*vW) / (1.0 - pow(beta2_, iteration_number_ + 1));
+
+      //      *W = W->array() - learning_rate * mW_corrected.array() / (epsilon_ + vW_corrected.array().sqrt());
+      double stepsize = learning_rate; // / sqrt(static_cast<double>(iteration_number_ + 1));
+      *W = W->array() - stepsize * mW_corrected.array() / (epsilon_ + vW_corrected.array().sqrt());
+#else
+      // Adagrad.
+      *vW = vW->array() + (dW->array() * dW->array());
+      //std::cout << epsilon_ + vW->array().sqrt() << std::endl;
+      *W = W->array() - learning_rate * dW->array() / (epsilon_ + vW->array().sqrt());
+      //*W = W->array() - learning_rate * dW->array();
+#endif
+
+    }
+
+    ++iteration_number_;
+  }
 
   void InitializeParameters() {
     std::vector<Matrix<Real>*> weights;
@@ -157,7 +283,7 @@ template<typename Real> class Layer {
   virtual void ResetGradients() = 0;
   virtual void RunForward() = 0;
   virtual void RunBackward() = 0;
-  virtual void UpdateParameters(double learning_rate) = 0;
+  //virtual void UpdateParameters(double learning_rate) = 0;
 
   int GetNumInputs() const { return inputs_.size(); }
   void SetNumInputs(int n) {
@@ -187,6 +313,16 @@ template<typename Real> class Layer {
   Matrix<Real> output_;
   std::vector<Matrix<Real>*> input_derivatives_;
   Matrix<Real> output_derivative_;
+
+  // ADAM parameters.
+  double beta1_;
+  double beta2_;
+  double epsilon_;
+  int iteration_number_;
+  std::vector<Matrix<Real>*> first_weight_moments_;
+  std::vector<Vector<Real>*> first_bias_moments_;
+  std::vector<Matrix<Real>*> second_weight_moments_;
+  std::vector<Vector<Real>*> second_bias_moments_;
 };
 
 template<typename Real> class SelectorLayer : public Layer<Real> {
@@ -219,7 +355,9 @@ template<typename Real> class SelectorLayer : public Layer<Real> {
       this->output_derivative_;
   }
 
+#if 0
   void UpdateParameters(double learning_rate) {}
+#endif
 
   void DefineBlock(int first_row, int first_column,
                    int num_rows, int num_columns) {
@@ -283,7 +421,9 @@ template<typename Real> class ConcatenatorLayer : public Layer<Real> {
     }
   }
 
+#if 0
   void UpdateParameters(double learning_rate) {}
+#endif
 };
 
 template<typename Real> class LookupLayer : public Layer<Real> {
@@ -433,10 +573,12 @@ template<typename Real> class LinearLayer : public Layer<Real> {
     dby_.noalias() += this->output_derivative_.rowwise().sum();
   }
 
+#if 0
   void UpdateParameters(double learning_rate) {
     Wxy_ -= learning_rate * dWxy_;
     by_ -= learning_rate * dby_;
   }
+#endif
 
  protected:
   int input_size_;
@@ -518,10 +660,12 @@ template<typename Real> class SoftmaxOutputLayer : public Layer<Real> {
     (*dh).noalias() += Why_.transpose() * dy; // Backprop into h.
   }
 
+#if 0
   void UpdateParameters(double learning_rate) {
     Why_ -= learning_rate * dWhy_;
     by_ -= learning_rate * dby_;
   }
+#endif
 
   int output_label() { return output_label_; }
   void set_output_label(int output_label) {
@@ -614,15 +758,17 @@ template<typename Real> class FeedforwardLayer : public Layer<Real> {
     DerivateActivation(activation_function_, this->output_, &dhraw);
     dhraw = dhraw.array() * this->output_derivative_.array();
     dWxh_.noalias() += dhraw * x.transpose();
-    std::cout << dbh_.size() << " " << dhraw.size() << std::endl;
+    //std::cout << dbh_.size() << " " << dhraw.size() << std::endl;
     dbh_.noalias() += dhraw.rowwise().sum();
     *dx += Wxh_.transpose() * dhraw; // Backprop into x.
   }
 
+#if 0
   void UpdateParameters(double learning_rate) {
     Wxh_ -= learning_rate * dWxh_;
     bh_ -= learning_rate * dbh_;
   }
+#endif
 
  protected:
   int activation_function_;
@@ -758,6 +904,7 @@ template<typename Real> class RNNLayer : public Layer<Real> {
     dh0_.noalias() += dhnext;
   }
 
+#if 0
   virtual void UpdateParameters(double learning_rate) {
     Wxh_ -= learning_rate * dWxh_;
     bh_ -= learning_rate * dbh_;
@@ -766,6 +913,7 @@ template<typename Real> class RNNLayer : public Layer<Real> {
       h0_ -= learning_rate * dh0_;
     }
   }
+#endif
 
  protected:
   int activation_function_;
@@ -969,6 +1117,7 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     this->dh0_.noalias() += dhnext;
   }
 
+#if 0
   void UpdateParameters(double learning_rate) {
     RNNLayer<Real>::UpdateParameters(learning_rate);
     Wxz_ -= learning_rate * dWxz_;
@@ -978,6 +1127,7 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     bz_ -= learning_rate * dbz_;
     br_ -= learning_rate * dbr_;
   }
+#endif
 
  protected:
   Matrix<Real> Wxz_;
@@ -1102,7 +1252,10 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     if (use_sparsemax_) {
       Real tau;
       Real r = 1.0;
+      //std::cout << "v=" << v << std::endl;
       ProjectOntoSimplex(v, r, &p_, &tau);
+      //std::cout << "p=" << p_ << std::endl;
+      //std::cout << "tau=" << tau << std::endl;
     } else {
       Real logsum = LogSumExp(v);
       p_ = (v.array() - logsum).exp();
@@ -1186,12 +1339,14 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     dbz_.noalias() += dzraw_sum;
   }
 
+#if 0
   void UpdateParameters(double learning_rate) {
     Wxz_ -= learning_rate * dWxz_;
     Wyz_ -= learning_rate * dWyz_;
     dbz_ -= learning_rate * dbz_;
     wzp_ -= learning_rate * dwzp_;
   }
+#endif
 
  protected:
   int activation_function_;

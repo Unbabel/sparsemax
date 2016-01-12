@@ -185,7 +185,7 @@ void ProjectOntoSimplex(const Vector<Real> &x, Real r, Vector<Real> *p, Real *ta
     if (x[j] < *tau) {
       (*p)[j] = 0.0;
     } else {
-      (*p)[j] -= *tau;
+      (*p)[j] = x[j] - (*tau);
     }
   }
 }

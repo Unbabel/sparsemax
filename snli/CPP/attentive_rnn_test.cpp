@@ -18,6 +18,8 @@ int main(int argc, char** argv) {
   DoubleMatrix x, dx;
   DoubleMatrix *dy;
 
+  srand(1234);
+
   linear_layer.InitializeParameters();
   linear_layer.ResetGradients();
   x = DoubleMatrix::Random(linear_layer.input_size(), num_tokens);
