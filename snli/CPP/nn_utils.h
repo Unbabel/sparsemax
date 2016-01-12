@@ -10,9 +10,20 @@
 #include <cmath>
 #include "utils.h"
 
-typedef Eigen::MatrixXf Matrix;
-typedef Eigen::VectorXf Vector;
-typedef Eigen::RowVectorXf RowVector;
+//typedef Eigen::MatrixXf Matrix;
+//typedef Eigen::VectorXf Vector;
+//typedef Eigen::RowVectorXf RowVector;
+
+template<typename Real>
+using Matrix = Eigen::Matrix<Real, Eigen::Dynamic, Eigen::Dynamic>;
+
+template<typename Real>
+using Vector = Eigen::Matrix<Real, Eigen::Dynamic, 1>;
+
+typedef Matrix<float> FloatMatrix;
+typedef Vector<float> FloatVector;
+typedef Matrix<double> DoubleMatrix;
+typedef Vector<double> DoubleVector;
 
 struct ActivationFunctions {
   enum types {
@@ -23,7 +34,8 @@ struct ActivationFunctions {
   };
 };
 
-void LoadMatrixParameter(const std::string& name, Matrix* W) {
+template<typename Real>
+void LoadMatrixParameter(const std::string& name, Matrix<Real>* W) {
   //std::string param_file = "model.1/" + name + ".txt";
   std::string param_file = "../theano/model/" + name + ".txt";
   std::ifstream is;
@@ -48,7 +60,8 @@ void LoadMatrixParameter(const std::string& name, Matrix* W) {
   is.close();
 }
 
-void LoadVectorParameter(const std::string& name, Vector* b) {
+template<typename Real>
+void LoadVectorParameter(const std::string& name, Vector<Real>* b) {
   //std::string param_file = "model.1/" + name + ".txt";
   std::string param_file = "../theano/model/" + name + ".txt";
   std::ifstream is;
@@ -73,31 +86,33 @@ void LoadVectorParameter(const std::string& name, Vector* b) {
   is.close();
 }
 
-void EvaluateActivation(int activation_function, const Matrix &hu,
-                        Matrix *h) {
+template<typename Real>
+void EvaluateActivation(int activation_function, const Matrix<Real> &hu,
+                        Matrix<Real> *h) {
   if (activation_function == ActivationFunctions::TANH) {
 #if 0
-    *h = Matrix::Zero(hu.rows(), hu.cols());
-    float const *begin = hu.data();
-    float const *end = begin + hu.rows() * hu.cols();
-    float *it_out = h->data();
-    for(const float *it = begin;
+    *h = Matrix<Real>::Zero(hu.rows(), hu.cols());
+    Real const *begin = hu.data();
+    Real const *end = begin + hu.rows() * hu.cols();
+    Real *it_out = h->data();
+    for(const Real *it = begin;
         it != end;
         ++it, ++it_out) {
-      *it_out = static_cast<float>(tanh(*it));
+      *it_out = static_cast<Real>(tanh(*it));
     }
 #else
-    *h = hu.unaryExpr(std::ptr_fun<float, float>(std::tanh));
+    *h = hu.unaryExpr(std::ptr_fun<Real, Real>(std::tanh));
 #endif
   } else if (activation_function == ActivationFunctions::LOGISTIC) {
-    *h = hu.unaryExpr([](float t) -> float { return 1.0 / (1.0 + exp(-t)); });
+    *h = hu.unaryExpr([](Real t) -> Real { return 1.0 / (1.0 + exp(-t)); });
   } else {
     assert(false);
   }
 }
 
-void DerivateActivation(int activation_function, const Matrix &dh,
-                        Matrix *dhu) {
+template<typename Real>
+void DerivateActivation(int activation_function, const Matrix<Real> &dh,
+                        Matrix<Real> *dhu) {
   if (activation_function == ActivationFunctions::TANH) {
     *dhu = (1.0 - dh.array() * dh.array());
   } else if (activation_function == ActivationFunctions::LOGISTIC) {
@@ -107,31 +122,33 @@ void DerivateActivation(int activation_function, const Matrix &dh,
   }
 }
 
-void EvaluateActivation(int activation_function, const Vector &hu,
-                        Vector *h) {
+template<typename Real>
+void EvaluateActivation(int activation_function, const Vector<Real> &hu,
+                        Vector<Real> *h) {
   if (activation_function == ActivationFunctions::TANH) {
 #if 0
     *h = Matrix::Zero(hu.rows(), hu.cols());
-    float const *begin = hu.data();
-    float const *end = begin + hu.rows() * hu.cols();
-    float *it_out = h->data();
-    for(const float *it = begin;
+    Real const *begin = hu.data();
+    Real const *end = begin + hu.rows() * hu.cols();
+    Real *it_out = h->data();
+    for(const Real *it = begin;
         it != end;
         ++it, ++it_out) {
-      *it_out = static_cast<float>(tanh(*it));
+      *it_out = static_cast<Real>(tanh(*it));
     }
 #else
-    *h = hu.unaryExpr(std::ptr_fun<float, float>(std::tanh));
+    *h = hu.unaryExpr(std::ptr_fun<Real, Real>(std::tanh));
 #endif
   } else if (activation_function == ActivationFunctions::LOGISTIC) {
-    *h = hu.unaryExpr([](float t) -> float { return 1.0 / (1.0 + exp(-t)); });
+    *h = hu.unaryExpr([](Real t) -> Real { return 1.0 / (1.0 + exp(-t)); });
   } else {
     assert(false);
   }
 }
 
-void DerivateActivation(int activation_function, const Vector &dh,
-                        Vector *dhu) {
+template<typename Real>
+void DerivateActivation(int activation_function, const Vector<Real> &dh,
+                        Vector<Real> *dhu) {
   if (activation_function == ActivationFunctions::TANH) {
     *dhu = (1.0 - dh.array() * dh.array());
   } else if (activation_function == ActivationFunctions::LOGISTIC) {
@@ -141,24 +158,26 @@ void DerivateActivation(int activation_function, const Vector &dh,
   }
 }
 
-float LogSumExp(const Vector &x) {
+template<typename Real>
+Real LogSumExp(const Vector<Real> &x) {
 #if 0
   //return log(x.unaryExpr(std::ptr_fun(exp)).sum());
   return log(x.array().exp().sum());
 #else
-  float xmax = x.maxCoeff();
+  Real xmax = x.maxCoeff();
   return xmax + log((x.array() - xmax).exp().sum());
 #endif
 }
 
-void ProjectOntoSimplex(const Vector &x, double r, Vector *p, float *tau) {
+template<typename Real>
+void ProjectOntoSimplex(const Vector<Real> &x, Real r, Vector<Real> *p, Real *tau) {
   int j;
   int d = x.size();
-  float s = x.sum();
+  Real s = x.sum();
   *p = x;
   std::sort(p->data(), p->data() + d);
   for (j = 0; j < d; j++) {
-    *tau = (s - r) / ((double) (d - j));
+    *tau = (s - r) / ((Real) (d - j));
     if ((*p)[j] > *tau) break;
     s -= (*p)[j];
   }

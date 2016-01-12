@@ -25,28 +25,30 @@ class RNN {
     hidden_size_ = hidden_size;
     output_size_ = output_size;
     activation_function_ = ActivationFunctions::TANH; //LOGISTIC;
-    lookup_layer_ = new LookupLayer(dictionary->GetNumWords(),
-                                    embedding_dimension);
-    linear_layer_ = new LinearLayer(embedding_dimension, input_size_);
+    lookup_layer_ = new LookupLayer<float>(dictionary->GetNumWords(),
+                                           embedding_dimension);
+    linear_layer_ = new LinearLayer<float>(embedding_dimension, input_size_);
     //rnn_layer_ = new RNNLayer(input_size_, hidden_size);
-    rnn_layer_ = new GRULayer(input_size_, hidden_size);
+    rnn_layer_ = new GRULayer<float>(input_size_, hidden_size);
     if (use_attention_) {
-      attention_layer_ = new AttentionLayer(hidden_size, hidden_size, hidden_size,
-                                            sparse_attention_);
+      attention_layer_ = new AttentionLayer<float>(hidden_size, hidden_size,
+                                                   hidden_size,
+                                                   sparse_attention_);
     } else {
       attention_layer_ = NULL;
     }
-    hypothesis_selector_layer_ = new SelectorLayer;
+    hypothesis_selector_layer_ = new SelectorLayer<float>;
     if (use_attention_) {
-      premise_extractor_layer_ = new SelectorLayer;
+      premise_extractor_layer_ = new SelectorLayer<float>;
       premise_selector_layer_ = NULL;
     } else {
       premise_extractor_layer_ = NULL;
-      premise_selector_layer_ = new SelectorLayer;
+      premise_selector_layer_ = new SelectorLayer<float>;
     }
-    concatenator_layer_ = new ConcatenatorLayer;
-    feedforward_layer_ = new FeedforwardLayer(2*hidden_size, hidden_size);
-    output_layer_ = new SoftmaxOutputLayer(hidden_size, output_size);
+    concatenator_layer_ = new ConcatenatorLayer<float>;
+    feedforward_layer_ = new FeedforwardLayer<float>(2*hidden_size,
+                                                     hidden_size);
+    output_layer_ = new SoftmaxOutputLayer<float>(hidden_size, output_size);
   }
   virtual ~RNN() {
     delete lookup_layer_;
@@ -64,8 +66,8 @@ class RNN {
   int GetEmbeddingSize() { return lookup_layer_->embedding_dimension(); }
   int GetInputSize() { return linear_layer_->output_size(); }
 
-  virtual void CollectAllParameters(std::vector<Matrix*> *weights,
-                                    std::vector<Vector*> *biases,
+  virtual void CollectAllParameters(std::vector<FloatMatrix*> *weights,
+                                    std::vector<FloatVector*> *biases,
                                     std::vector<std::string> *weight_names,
                                     std::vector<std::string> *bias_names) {
     weights->clear();
@@ -107,7 +109,7 @@ class RNN {
     output_layer_->InitializeParameters();
   }
 
-  void SetFixedEmbeddings(const Matrix &fixed_embeddings,
+  void SetFixedEmbeddings(const FloatMatrix &fixed_embeddings,
                           const std::vector<int> &word_ids) {
     lookup_layer_->SetFixedEmbeddings(fixed_embeddings, word_ids);
   }
@@ -160,7 +162,7 @@ class RNN {
     int num_sentences = input_sequences.size();
     for (int i = 0; i < input_sequences.size(); ++i) {
       RunForwardPass(input_sequences[i]);
-      Vector p = output_layer_->GetOutput();
+      FloatVector p = output_layer_->GetOutput();
       double loss = -log(p(output_labels[i]));
       int prediction;
       p.maxCoeff(&prediction);
@@ -208,7 +210,7 @@ class RNN {
            int *predicted_label) {
     RunForwardPass(input_sequence);
     int prediction;
-    Vector p = output_layer_->GetOutput();
+    FloatVector p = output_layer_->GetOutput();
     p.maxCoeff(&prediction);
     *predicted_label = prediction;
   }
@@ -402,8 +404,8 @@ class RNN {
     int num_checks = 20;
     double delta = 1e-7;
     if (check_gradient) {
-      Matrix *output_derivative = output_layer_->GetOutputDerivative();
-      const Matrix &output = output_layer_->GetOutput();
+      FloatMatrix *output_derivative = output_layer_->GetOutputDerivative();
+      const FloatMatrix &output = output_layer_->GetOutput();
       output_derivative->setZero(output_size_, 1);
       int l = output_layer_->output_label();
       (*output_derivative)(l) = -1.0 / output(l);
@@ -430,24 +432,24 @@ class RNN {
  protected:
   Dictionary *dictionary_;
   int activation_function_;
-  LookupLayer *lookup_layer_;
-  LinearLayer *linear_layer_;
-  RNNLayer *rnn_layer_;
-  AttentionLayer *attention_layer_;
-  FeedforwardLayer *feedforward_layer_;
-  SelectorLayer *hypothesis_selector_layer_;
-  SelectorLayer *premise_selector_layer_;
-  SelectorLayer *premise_extractor_layer_;
-  ConcatenatorLayer *concatenator_layer_;
-  SoftmaxOutputLayer *output_layer_;
+  LookupLayer<float> *lookup_layer_;
+  LinearLayer<float> *linear_layer_;
+  RNNLayer<float> *rnn_layer_;
+  AttentionLayer<float> *attention_layer_;
+  FeedforwardLayer<float> *feedforward_layer_;
+  SelectorLayer<float> *hypothesis_selector_layer_;
+  SelectorLayer<float> *premise_selector_layer_;
+  SelectorLayer<float> *premise_extractor_layer_;
+  ConcatenatorLayer<float> *concatenator_layer_;
+  SoftmaxOutputLayer<float> *output_layer_;
   int input_size_;
   int hidden_size_;
   int output_size_;
   bool use_attention_;
   bool sparse_attention_;
 
-  //Matrix x_;
-  //Matrix h_;
+  //FloatMatrix x_;
+  //FloatMatrix h_;
 };
 
 #if 0
@@ -467,18 +469,18 @@ class BiRNN : public RNN {
   }
   ~BiRNN() {}
 
-  void CollectAllParameters(std::vector<Matrix*> *weights,
-                            std::vector<Vector*> *biases,
+  void CollectAllParameters(std::vector<FloatMatrix*> *weights,
+                            std::vector<FloatVector*> *biases,
                             std::vector<std::string> *weight_names,
                             std::vector<std::string> *bias_names) {
     RNN::CollectAllParameters(weights, biases, weight_names, bias_names);
 
-    Wxl_ = Matrix::Zero(hidden_size_, GetInputSize());
-    Wll_ = Matrix::Zero(hidden_size_, hidden_size_);
-    Wly_ = Matrix::Zero(output_size_, hidden_size_);
-    bl_ = Vector::Zero(hidden_size_, 1);
+    Wxl_ = FloatMatrix::Zero(hidden_size_, GetInputSize());
+    Wll_ = FloatMatrix::Zero(hidden_size_, hidden_size_);
+    Wly_ = FloatMatrix::Zero(output_size_, hidden_size_);
+    bl_ = FloatVector::Zero(hidden_size_, 1);
     if (use_hidden_start_) {
-      l0_ = Vector::Zero(hidden_size_);
+      l0_ = FloatVector::Zero(hidden_size_);
     }
 
     weights->push_back(&Wxl_);
@@ -507,10 +509,10 @@ class BiRNN : public RNN {
     int output_size = Why_.rows();
 
     h_.setZero(hidden_size, input_sequence.size());
-    Vector hprev = Vector::Zero(h_.rows());
+    FloatVector hprev = FloatVector::Zero(h_.rows());
     if (use_hidden_start_) hprev = h0_;
     for (int t = 0; t < input_sequence.size(); ++t) {
-      Matrix result;
+      FloatMatrix result;
       EvaluateActivation(activation_function_,
                          Wxh_ * x_.col(t) + bh_ + Whh_ * hprev,
                          &result);
@@ -528,10 +530,10 @@ class BiRNN : public RNN {
     }
 
     l_.setZero(hidden_size, input_sequence.size());
-    Vector lnext = Vector::Zero(l_.rows());
+    FloatVector lnext = FloatVector::Zero(l_.rows());
     if (use_hidden_start_) lnext = l0_;
     for (int t = input_sequence.size() - 1; t >= 0; --t) {
-      Matrix result;
+      FloatMatrix result;
       EvaluateActivation(activation_function_,
                          Wxl_ * x_.col(t) + bl_ + Wll_ * lnext,
                          &result);
@@ -561,29 +563,29 @@ class BiRNN : public RNN {
   void RunBackwardPass(const std::vector<Input> &input_sequence,
                        const std::vector<int> &output_sequence,
                        double learning_rate) {
-    Matrix dWhy = Matrix::Zero(Why_.rows(), Why_.cols());
-    Matrix dWhh = Matrix::Zero(Whh_.rows(), Whh_.cols());
-    Matrix dWxh = Matrix::Zero(Wxh_.rows(), Wxh_.cols());
-    Vector dby = Vector::Zero(Why_.rows());
-    Vector dbh = Vector::Zero(Whh_.rows());
-    Vector dhnext = Vector::Zero(Whh_.rows());
+    FloatMatrix dWhy = FloatMatrix::Zero(Why_.rows(), Why_.cols());
+    FloatMatrix dWhh = FloatMatrix::Zero(Whh_.rows(), Whh_.cols());
+    FloatMatrix dWxh = FloatMatrix::Zero(Wxh_.rows(), Wxh_.cols());
+    FloatVector dby = FloatVector::Zero(Why_.rows());
+    FloatVector dbh = FloatVector::Zero(Whh_.rows());
+    FloatVector dhnext = FloatVector::Zero(Whh_.rows());
 
-    Matrix dWly = Matrix::Zero(Wly_.rows(), Wly_.cols());
-    Matrix dWll = Matrix::Zero(Wll_.rows(), Wll_.cols());
-    Matrix dWxl = Matrix::Zero(Wxl_.rows(), Wxl_.cols());
-    Vector dbl = Vector::Zero(Wll_.rows());
-    Vector dlprev = Vector::Zero(Wll_.rows());
+    FloatMatrix dWly = FloatMatrix::Zero(Wly_.rows(), Wly_.cols());
+    FloatMatrix dWll = FloatMatrix::Zero(Wll_.rows(), Wll_.cols());
+    FloatMatrix dWxl = FloatMatrix::Zero(Wxl_.rows(), Wxl_.cols());
+    FloatVector dbl = FloatVector::Zero(Wll_.rows());
+    FloatVector dlprev = FloatVector::Zero(Wll_.rows());
 
-    Matrix dx = Matrix::Zero(GetInputSize(), input_sequence.size());
+    FloatMatrix dx = FloatMatrix::Zero(GetInputSize(), input_sequence.size());
 
     for (int t = 0; t < input_sequence.size(); ++t) {
-      Vector dy = p_.col(t);
+      FloatVector dy = p_.col(t);
       dy[output_sequence[t]] -= 1.0; // Backprop into y (softmax grad).
 
       dWly += dy * l_.col(t).transpose();
 
-      Vector dl = Wly_.transpose() * dy + dlprev; // Backprop into l.
-      Matrix dlraw;
+      FloatVector dl = Wly_.transpose() * dy + dlprev; // Backprop into l.
+      FloatMatrix dlraw;
       DerivateActivation(activation_function_, l_.col(t), &dlraw);
       dlraw = dlraw.array() * dl.array();
 
@@ -598,14 +600,14 @@ class BiRNN : public RNN {
     }
 
     for (int t = input_sequence.size() - 1; t >= 0; --t) {
-      Vector dy = p_.col(t);
+      FloatVector dy = p_.col(t);
       dy[output_sequence[t]] -= 1.0; // Backprop into y (softmax grad).
 
       dWhy += dy * h_.col(t).transpose();
       dby += dy;
 
-      Vector dh = Why_.transpose() * dy + dhnext; // Backprop into h.
-      Matrix dhraw;
+      FloatVector dh = Why_.transpose() * dy + dhnext; // Backprop into h.
+      FloatMatrix dhraw;
       DerivateActivation(activation_function_, h_.col(t), &dhraw);
       dhraw = dhraw.array() * dh.array();
 
@@ -640,13 +642,13 @@ class BiRNN : public RNN {
   }
 
  protected:
-  Matrix Wxl_;
-  Matrix Wll_;
-  Matrix Wly_;
-  Vector bl_;
-  Vector l0_;
+  FloatMatrix Wxl_;
+  FloatMatrix Wll_;
+  FloatMatrix Wly_;
+  FloatVector bl_;
+  FloatVector l0_;
 
-  Matrix l_;
+  FloatMatrix l_;
 };
 
 
@@ -667,18 +669,18 @@ class RNN_GRU : public RNN {
   }
   virtual ~RNN_GRU() {}
 
-  virtual void CollectAllParameters(std::vector<Matrix*> *weights,
-                                    std::vector<Vector*> *biases,
+  virtual void CollectAllParameters(std::vector<FloatMatrix*> *weights,
+                                    std::vector<FloatVector*> *biases,
                                     std::vector<std::string> *weight_names,
                                     std::vector<std::string> *bias_names) {
     RNN::CollectAllParameters(weights, biases, weight_names, bias_names);
 
-    Wxz_ = Matrix::Zero(hidden_size_, GetInputSize());
-    Whz_ = Matrix::Zero(hidden_size_, hidden_size_);
-    Wxr_ = Matrix::Zero(hidden_size_, GetInputSize());
-    Whr_ = Matrix::Zero(hidden_size_, hidden_size_);
-    bz_ = Vector::Zero(hidden_size_, 1);
-    br_ = Vector::Zero(hidden_size_, 1);
+    Wxz_ = FloatMatrix::Zero(hidden_size_, GetInputSize());
+    Whz_ = FloatMatrix::Zero(hidden_size_, hidden_size_);
+    Wxr_ = FloatMatrix::Zero(hidden_size_, GetInputSize());
+    Whr_ = FloatMatrix::Zero(hidden_size_, hidden_size_);
+    bz_ = FloatVector::Zero(hidden_size_, 1);
+    br_ = FloatVector::Zero(hidden_size_, 1);
 
     weights->push_back(&Wxz_);
     weights->push_back(&Whz_);
@@ -707,10 +709,10 @@ class RNN_GRU : public RNN {
     r_.setZero(hidden_size, input_sequence.size());
     hu_.setZero(hidden_size, input_sequence.size());
     h_.setZero(hidden_size, input_sequence.size());
-    Vector hprev = Vector::Zero(h_.rows());
+    FloatVector hprev = FloatVector::Zero(h_.rows());
     if (use_hidden_start_) hprev = h0_;
     for (int t = 0; t < input_sequence.size(); ++t) {
-      Matrix result;
+      FloatMatrix result;
       EvaluateActivation(ActivationFunctions::LOGISTIC,
                          Wxz_ * x_.col(t) + bz_ + Whz_ * hprev,
                          &result);
@@ -729,9 +731,9 @@ class RNN_GRU : public RNN {
       //h_.col(t) = z_.col(t) * hu_.col(t) + (1.0 - z_.col(t)) * hprev;
       h_.col(t) = z_.col(t).cwiseProduct(hu_.col(t) - hprev) + hprev;
 
-      //Vector hraw = Wxh_ * x_.col(t) + bh_;
+      //FloatVector hraw = Wxh_ * x_.col(t) + bh_;
       //if (t > 0) hraw += Whh_ * h_.col(t-1);
-      //Matrix result;
+      //FloatMatrix result;
       //EvaluateActivation(activation_function_, hraw, &result);
       //h_.col(t) = result;
 
@@ -740,9 +742,9 @@ class RNN_GRU : public RNN {
 
     y_.setZero(output_size, input_sequence.size());
     p_.setZero(output_size, input_sequence.size());
-    //Matrix y = (Why_ * h).colwise() + by_;
-    //Vector logsums = LogSumExpColumnwise(y);
-    //Matrix p = (y.rowwise() - logsums.transpose()).array().exp();
+    //FloatMatrix y = (Why_ * h).colwise() + by_;
+    //FloatVector logsums = LogSumExpColumnwise(y);
+    //FloatMatrix p = (y.rowwise() - logsums.transpose()).array().exp();
     for (int t = 0; t < input_sequence.size(); ++t) {
       y_.col(t) = Why_ * h_.col(t) + by_;
       double logsum = LogSumExp(y_.col(t));
@@ -753,47 +755,47 @@ class RNN_GRU : public RNN {
   virtual void RunBackwardPass(const std::vector<Input> &input_sequence,
                        const std::vector<int> &output_sequence,
                        double learning_rate) {
-    Matrix dWhy = Matrix::Zero(Why_.rows(), Why_.cols());
-    Matrix dWhh = Matrix::Zero(Whh_.rows(), Whh_.cols());
-    Matrix dWxh = Matrix::Zero(Wxh_.rows(), Wxh_.cols());
-    Matrix dWhz = Matrix::Zero(Whz_.rows(), Whz_.cols());
-    Matrix dWxz = Matrix::Zero(Wxz_.rows(), Wxz_.cols());
-    Matrix dWhr = Matrix::Zero(Whr_.rows(), Whr_.cols());
-    Matrix dWxr = Matrix::Zero(Wxr_.rows(), Wxr_.cols());
-    Vector dby = Vector::Zero(Why_.rows());
-    Vector dbh = Vector::Zero(Whh_.rows());
-    Vector dbz = Vector::Zero(Whz_.rows());
-    Vector dbr = Vector::Zero(Whr_.rows());
-    Vector dhnext = Vector::Zero(Whh_.rows());
+    FloatMatrix dWhy = FloatMatrix::Zero(Why_.rows(), Why_.cols());
+    FloatMatrix dWhh = FloatMatrix::Zero(Whh_.rows(), Whh_.cols());
+    FloatMatrix dWxh = FloatMatrix::Zero(Wxh_.rows(), Wxh_.cols());
+    FloatMatrix dWhz = FloatMatrix::Zero(Whz_.rows(), Whz_.cols());
+    FloatMatrix dWxz = FloatMatrix::Zero(Wxz_.rows(), Wxz_.cols());
+    FloatMatrix dWhr = FloatMatrix::Zero(Whr_.rows(), Whr_.cols());
+    FloatMatrix dWxr = FloatMatrix::Zero(Wxr_.rows(), Wxr_.cols());
+    FloatVector dby = FloatVector::Zero(Why_.rows());
+    FloatVector dbh = FloatVector::Zero(Whh_.rows());
+    FloatVector dbz = FloatVector::Zero(Whz_.rows());
+    FloatVector dbr = FloatVector::Zero(Whr_.rows());
+    FloatVector dhnext = FloatVector::Zero(Whh_.rows());
 
-    Matrix dx = Matrix::Zero(GetInputSize(), input_sequence.size());
+    FloatMatrix dx = FloatMatrix::Zero(GetInputSize(), input_sequence.size());
 
     for (int t = input_sequence.size() - 1; t >= 0; --t) {
-      Vector dy = p_.col(t);
+      FloatVector dy = p_.col(t);
       dy[output_sequence[t]] -= 1.0; // Backprop into y (softmax grad).
 
       dWhy += dy * h_.col(t).transpose();
       dby += dy;
 
-      Vector dh = Why_.transpose() * dy + dhnext; // Backprop into h.
-      Vector dhu = z_.col(t).cwiseProduct(dh);
-      Matrix dhuraw;
+      FloatVector dh = Why_.transpose() * dy + dhnext; // Backprop into h.
+      FloatVector dhu = z_.col(t).cwiseProduct(dh);
+      FloatMatrix dhuraw;
       DerivateActivation(activation_function_, hu_.col(t), &dhuraw);
       dhuraw = dhuraw.cwiseProduct(dhu);
-      Vector hprev;
+      FloatVector hprev;
       if (t == 0) {
-        hprev = Vector::Zero(h_.rows());
+        hprev = FloatVector::Zero(h_.rows());
       } else {
         hprev = h_.col(t-1);
       }
 
-      Vector dq = Whh_.transpose() * dhuraw;
-      Vector dz = (hu_.col(t) - hprev).cwiseProduct(dh);
-      Vector dr = hprev.cwiseProduct(dq);
-      Matrix dzraw;
+      FloatVector dq = Whh_.transpose() * dhuraw;
+      FloatVector dz = (hu_.col(t) - hprev).cwiseProduct(dh);
+      FloatVector dr = hprev.cwiseProduct(dq);
+      FloatMatrix dzraw;
       DerivateActivation(ActivationFunctions::LOGISTIC, z_.col(t), &dzraw);
       dzraw = dzraw.cwiseProduct(dz);
-      Matrix drraw;
+      FloatMatrix drraw;
       DerivateActivation(ActivationFunctions::LOGISTIC, r_.col(t), &drraw);
       drraw = drraw.cwiseProduct(dr);
 
@@ -834,16 +836,16 @@ class RNN_GRU : public RNN {
   }
 
  protected:
-  Matrix Wxz_;
-  Matrix Whz_;
-  Matrix Wxr_;
-  Matrix Whr_;
-  Vector bz_;
-  Vector br_;
+  FloatMatrix Wxz_;
+  FloatMatrix Whz_;
+  FloatMatrix Wxr_;
+  FloatMatrix Whr_;
+  FloatVector bz_;
+  FloatVector br_;
 
-  Matrix z_;
-  Matrix r_;
-  Matrix hu_;
+  FloatMatrix z_;
+  FloatMatrix r_;
+  FloatMatrix hu_;
 
 };
 
@@ -864,26 +866,26 @@ class BiRNN_GRU : public RNN_GRU {
   }
   ~BiRNN_GRU() {}
 
-  void CollectAllParameters(std::vector<Matrix*> *weights,
-                            std::vector<Vector*> *biases,
+  void CollectAllParameters(std::vector<FloatMatrix*> *weights,
+                            std::vector<FloatVector*> *biases,
                             std::vector<std::string> *weight_names,
                             std::vector<std::string> *bias_names) {
     RNN_GRU::CollectAllParameters(weights, biases, weight_names, bias_names);
 
-    Wxz_r_ = Matrix::Zero(hidden_size_, GetInputSize());
-    Wlz_r_ = Matrix::Zero(hidden_size_, hidden_size_);
-    bz_r_ = Vector::Zero(hidden_size_, 1);
+    Wxz_r_ = FloatMatrix::Zero(hidden_size_, GetInputSize());
+    Wlz_r_ = FloatMatrix::Zero(hidden_size_, hidden_size_);
+    bz_r_ = FloatVector::Zero(hidden_size_, 1);
 
-    Wxr_r_ = Matrix::Zero(hidden_size_, GetInputSize());
-    Wlr_r_ = Matrix::Zero(hidden_size_, hidden_size_);
-    br_r_ = Vector::Zero(hidden_size_, 1);
+    Wxr_r_ = FloatMatrix::Zero(hidden_size_, GetInputSize());
+    Wlr_r_ = FloatMatrix::Zero(hidden_size_, hidden_size_);
+    br_r_ = FloatVector::Zero(hidden_size_, 1);
 
-    Wxl_ = Matrix::Zero(hidden_size_, GetInputSize());
-    Wll_ = Matrix::Zero(hidden_size_, hidden_size_);
-    Wly_ = Matrix::Zero(output_size_, hidden_size_);
-    bl_ = Vector::Zero(hidden_size_, 1);
+    Wxl_ = FloatMatrix::Zero(hidden_size_, GetInputSize());
+    Wll_ = FloatMatrix::Zero(hidden_size_, hidden_size_);
+    Wly_ = FloatMatrix::Zero(output_size_, hidden_size_);
+    bl_ = FloatVector::Zero(hidden_size_, 1);
     if (use_hidden_start_) {
-      l0_ = Vector::Zero(hidden_size_);
+      l0_ = FloatVector::Zero(hidden_size_);
     }
 
     weights->push_back(&Wxz_r_);
@@ -929,10 +931,10 @@ class BiRNN_GRU : public RNN_GRU {
     r_.setZero(hidden_size, input_sequence.size());
     hu_.setZero(hidden_size, input_sequence.size());
     h_.setZero(hidden_size, input_sequence.size());
-    Vector hprev = Vector::Zero(h_.rows());
+    FloatVector hprev = FloatVector::Zero(h_.rows());
     if (use_hidden_start_) hprev = h0_;
     for (int t = 0; t < input_sequence.size(); ++t) {
-      Matrix result;
+      FloatMatrix result;
       EvaluateActivation(ActivationFunctions::LOGISTIC,
                          Wxz_ * x_.col(t) + bz_ + Whz_ * hprev,
                          &result);
@@ -951,9 +953,9 @@ class BiRNN_GRU : public RNN_GRU {
       //h_.col(t) = z_.col(t) * hu_.col(t) + (1.0 - z_.col(t)) * hprev;
       h_.col(t) = z_.col(t).cwiseProduct(hu_.col(t) - hprev) + hprev;
 
-      //Vector hraw = Wxh_ * x_.col(t) + bh_;
+      //FloatVector hraw = Wxh_ * x_.col(t) + bh_;
       //if (t > 0) hraw += Whh_ * h_.col(t-1);
-      //Matrix result;
+      //FloatMatrix result;
       //EvaluateActivation(activation_function_, hraw, &result);
       //h_.col(t) = result;
 
@@ -964,10 +966,10 @@ class BiRNN_GRU : public RNN_GRU {
     r_r_.setZero(hidden_size, input_sequence.size());
     lu_.setZero(hidden_size, input_sequence.size());
     l_.setZero(hidden_size, input_sequence.size());
-    Vector lnext = Vector::Zero(l_.rows());
+    FloatVector lnext = FloatVector::Zero(l_.rows());
     if (use_hidden_start_) lnext = l0_;
     for (int t = input_sequence.size() - 1; t >= 0; --t) {
-      Matrix result;
+      FloatMatrix result;
       EvaluateActivation(ActivationFunctions::LOGISTIC,
                          Wxz_r_ * x_.col(t) + bz_r_ + Wlz_r_ * lnext,
                          &result);
@@ -999,60 +1001,60 @@ class BiRNN_GRU : public RNN_GRU {
   void RunBackwardPass(const std::vector<Input> &input_sequence,
                        const std::vector<int> &output_sequence,
                        double learning_rate) {
-    Matrix dWhy = Matrix::Zero(Why_.rows(), Why_.cols());
-    Matrix dWhh = Matrix::Zero(Whh_.rows(), Whh_.cols());
-    Matrix dWxh = Matrix::Zero(Wxh_.rows(), Wxh_.cols());
-    Matrix dWhz = Matrix::Zero(Whz_.rows(), Whz_.cols());
-    Matrix dWxz = Matrix::Zero(Wxz_.rows(), Wxz_.cols());
-    Matrix dWhr = Matrix::Zero(Whr_.rows(), Whr_.cols());
-    Matrix dWxr = Matrix::Zero(Wxr_.rows(), Wxr_.cols());
-    Vector dby = Vector::Zero(Why_.rows());
-    Vector dbh = Vector::Zero(Whh_.rows());
-    Vector dbz = Vector::Zero(Whz_.rows());
-    Vector dbr = Vector::Zero(Whr_.rows());
-    Vector dhnext = Vector::Zero(Whh_.rows());
+    FloatMatrix dWhy = FloatMatrix::Zero(Why_.rows(), Why_.cols());
+    FloatMatrix dWhh = FloatMatrix::Zero(Whh_.rows(), Whh_.cols());
+    FloatMatrix dWxh = FloatMatrix::Zero(Wxh_.rows(), Wxh_.cols());
+    FloatMatrix dWhz = FloatMatrix::Zero(Whz_.rows(), Whz_.cols());
+    FloatMatrix dWxz = FloatMatrix::Zero(Wxz_.rows(), Wxz_.cols());
+    FloatMatrix dWhr = FloatMatrix::Zero(Whr_.rows(), Whr_.cols());
+    FloatMatrix dWxr = FloatMatrix::Zero(Wxr_.rows(), Wxr_.cols());
+    FloatVector dby = FloatVector::Zero(Why_.rows());
+    FloatVector dbh = FloatVector::Zero(Whh_.rows());
+    FloatVector dbz = FloatVector::Zero(Whz_.rows());
+    FloatVector dbr = FloatVector::Zero(Whr_.rows());
+    FloatVector dhnext = FloatVector::Zero(Whh_.rows());
 
-    Matrix dWly = Matrix::Zero(Wly_.rows(), Wly_.cols());
-    Matrix dWll = Matrix::Zero(Wll_.rows(), Wll_.cols());
-    Matrix dWxl = Matrix::Zero(Wxl_.rows(), Wxl_.cols());
-    Matrix dWlz_r = Matrix::Zero(Wlz_r_.rows(), Wlz_r_.cols());
-    Matrix dWxz_r = Matrix::Zero(Wxz_r_.rows(), Wxz_r_.cols());
-    Matrix dWlr_r = Matrix::Zero(Wlr_r_.rows(), Wlr_r_.cols());
-    Matrix dWxr_r = Matrix::Zero(Wxr_r_.rows(), Wxr_r_.cols());
-    Vector dbl = Vector::Zero(Wll_.rows());
-    Vector dbz_r = Vector::Zero(Wlz_r_.rows());
-    Vector dbr_r = Vector::Zero(Wlr_r_.rows());
-    Vector dlprev = Vector::Zero(Wll_.rows());
+    FloatMatrix dWly = FloatMatrix::Zero(Wly_.rows(), Wly_.cols());
+    FloatMatrix dWll = FloatMatrix::Zero(Wll_.rows(), Wll_.cols());
+    FloatMatrix dWxl = FloatMatrix::Zero(Wxl_.rows(), Wxl_.cols());
+    FloatMatrix dWlz_r = FloatMatrix::Zero(Wlz_r_.rows(), Wlz_r_.cols());
+    FloatMatrix dWxz_r = FloatMatrix::Zero(Wxz_r_.rows(), Wxz_r_.cols());
+    FloatMatrix dWlr_r = FloatMatrix::Zero(Wlr_r_.rows(), Wlr_r_.cols());
+    FloatMatrix dWxr_r = FloatMatrix::Zero(Wxr_r_.rows(), Wxr_r_.cols());
+    FloatVector dbl = FloatVector::Zero(Wll_.rows());
+    FloatVector dbz_r = FloatVector::Zero(Wlz_r_.rows());
+    FloatVector dbr_r = FloatVector::Zero(Wlr_r_.rows());
+    FloatVector dlprev = FloatVector::Zero(Wll_.rows());
 
-    Matrix dx = Matrix::Zero(GetInputSize(), input_sequence.size());
+    FloatMatrix dx = FloatMatrix::Zero(GetInputSize(), input_sequence.size());
 
     // TODO(atm): here.
 
     for (int t = 0; t < input_sequence.size(); ++t) {
-      Vector dy = p_.col(t);
+      FloatVector dy = p_.col(t);
       dy[output_sequence[t]] -= 1.0; // Backprop into y (softmax grad).
 
       dWly += dy * l_.col(t).transpose();
 
-      Vector dl = Wly_.transpose() * dy + dlprev; // Backprop into l.
-      Vector dlu = z_r_.col(t).cwiseProduct(dl);
-      Matrix dluraw;
+      FloatVector dl = Wly_.transpose() * dy + dlprev; // Backprop into l.
+      FloatVector dlu = z_r_.col(t).cwiseProduct(dl);
+      FloatMatrix dluraw;
       DerivateActivation(activation_function_, lu_.col(t), &dluraw);
       dluraw = dluraw.cwiseProduct(dlu);
-      Vector lnext;
+      FloatVector lnext;
       if (t == input_sequence.size() - 1) {
-        lnext = Vector::Zero(l_.rows());
+        lnext = FloatVector::Zero(l_.rows());
       } else {
         lnext = l_.col(t+1);
       }
 
-      Vector dq_r = Wll_.transpose() * dluraw;
-      Vector dz_r = (lu_.col(t) - lnext).cwiseProduct(dl);
-      Vector dr_r = lnext.cwiseProduct(dq_r);
-      Matrix dzraw_r;
+      FloatVector dq_r = Wll_.transpose() * dluraw;
+      FloatVector dz_r = (lu_.col(t) - lnext).cwiseProduct(dl);
+      FloatVector dr_r = lnext.cwiseProduct(dq_r);
+      FloatMatrix dzraw_r;
       DerivateActivation(ActivationFunctions::LOGISTIC, z_r_.col(t), &dzraw_r);
       dzraw_r = dzraw_r.cwiseProduct(dz_r);
-      Matrix drraw_r;
+      FloatMatrix drraw_r;
       DerivateActivation(ActivationFunctions::LOGISTIC, r_r_.col(t), &drraw_r);
       drraw_r = drraw_r.cwiseProduct(dr_r);
 
@@ -1075,31 +1077,31 @@ class BiRNN_GRU : public RNN_GRU {
     }
 
     for (int t = input_sequence.size() - 1; t >= 0; --t) {
-      Vector dy = p_.col(t);
+      FloatVector dy = p_.col(t);
       dy[output_sequence[t]] -= 1.0; // Backprop into y (softmax grad).
 
       dWhy += dy * h_.col(t).transpose();
       dby += dy;
 
-      Vector dh = Why_.transpose() * dy + dhnext; // Backprop into h.
-      Vector dhu = z_.col(t).cwiseProduct(dh);
-      Matrix dhuraw;
+      FloatVector dh = Why_.transpose() * dy + dhnext; // Backprop into h.
+      FloatVector dhu = z_.col(t).cwiseProduct(dh);
+      FloatMatrix dhuraw;
       DerivateActivation(activation_function_, hu_.col(t), &dhuraw);
       dhuraw = dhuraw.cwiseProduct(dhu);
-      Vector hprev;
+      FloatVector hprev;
       if (t == 0) {
-        hprev = Vector::Zero(h_.rows());
+        hprev = FloatVector::Zero(h_.rows());
       } else {
         hprev = h_.col(t-1);
       }
 
-      Vector dq = Whh_.transpose() * dhuraw;
-      Vector dz = (hu_.col(t) - hprev).cwiseProduct(dh);
-      Vector dr = hprev.cwiseProduct(dq);
-      Matrix dzraw;
+      FloatVector dq = Whh_.transpose() * dhuraw;
+      FloatVector dz = (hu_.col(t) - hprev).cwiseProduct(dh);
+      FloatVector dr = hprev.cwiseProduct(dq);
+      FloatMatrix dzraw;
       DerivateActivation(ActivationFunctions::LOGISTIC, z_.col(t), &dzraw);
       dzraw = dzraw.cwiseProduct(dz);
-      Matrix drraw;
+      FloatMatrix drraw;
       DerivateActivation(ActivationFunctions::LOGISTIC, r_.col(t), &drraw);
       drraw = drraw.cwiseProduct(dr);
 
@@ -1154,22 +1156,22 @@ class BiRNN_GRU : public RNN_GRU {
   }
 
  protected:
-  Matrix Wxl_;
-  Matrix Wll_;
-  Matrix Wly_;
-  Matrix Wxz_r_;
-  Matrix Wlz_r_;
-  Matrix Wxr_r_;
-  Matrix Wlr_r_;
-  Vector bl_;
-  Vector bz_r_;
-  Vector br_r_;
-  Vector l0_;
+  FloatMatrix Wxl_;
+  FloatMatrix Wll_;
+  FloatMatrix Wly_;
+  FloatMatrix Wxz_r_;
+  FloatMatrix Wlz_r_;
+  FloatMatrix Wxr_r_;
+  FloatMatrix Wlr_r_;
+  FloatVector bl_;
+  FloatVector bz_r_;
+  FloatVector br_r_;
+  FloatVector l0_;
 
-  Matrix l_;
-  Matrix z_r_;
-  Matrix r_r_;
-  Matrix lu_;
+  FloatMatrix l_;
+  FloatMatrix z_r_;
+  FloatMatrix r_r_;
+  FloatMatrix lu_;
 };
 
 #endif

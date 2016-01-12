@@ -137,8 +137,8 @@ int main(int argc, char** argv) {
   std::unordered_map<std::string, std::vector<double> > word_vectors;
   LoadWordVectors(word_vector_file, &word_vectors);
   int num_fixed_embeddings = word_vectors.size();
-  Matrix fixed_embeddings = Matrix::Zero(embedding_dimension,
-					 num_fixed_embeddings);
+  FloatMatrix fixed_embeddings = FloatMatrix::Zero(embedding_dimension,
+                                                   num_fixed_embeddings);
   std::vector<int> word_ids; 
   for (auto it = word_vectors.begin(); it != word_vectors.end(); ++it) {
     int wid = dictionary.AddWord(it->first);

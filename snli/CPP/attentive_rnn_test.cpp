@@ -5,23 +5,23 @@
 
 int main(int argc, char** argv) {
 
-  LinearLayer linear_layer(5, 5);
-  GRULayer rnn_layer(5, 5);
-  AttentionLayer attention_layer(5, 5, 5, false);
-  FeedforwardLayer feedforward_layer(5, 5);
-  SoftmaxOutputLayer output_layer(5, 3);
+  LinearLayer<double> linear_layer(5, 5);
+  GRULayer<double> rnn_layer(5, 5);
+  AttentionLayer<double> attention_layer(5, 5, 5, true);
+  FeedforwardLayer<double> feedforward_layer(5, 5);
+  SoftmaxOutputLayer<double> output_layer(5, 3);
 
   double delta = 1e-7;
   int num_checks = 20;
   int num_tokens = 4;
 
-  Matrix x, dx;
-  Matrix *dy;
+  DoubleMatrix x, dx;
+  DoubleMatrix *dy;
 
   linear_layer.InitializeParameters();
   linear_layer.ResetGradients();
-  x = Matrix::Random(linear_layer.input_size(), num_tokens);
-  dx = Matrix::Zero(linear_layer.input_size(), num_tokens);
+  x = DoubleMatrix::Random(linear_layer.input_size(), num_tokens);
+  dx = DoubleMatrix::Zero(linear_layer.input_size(), num_tokens);
   linear_layer.SetNumInputs(1);
   linear_layer.SetInput(0, x);
   linear_layer.SetInputDerivative(0, &dx);
@@ -31,8 +31,8 @@ int main(int argc, char** argv) {
 
   feedforward_layer.InitializeParameters();
   feedforward_layer.ResetGradients();
-  x = Matrix::Random(feedforward_layer.input_size(), num_tokens);
-  dx = Matrix::Zero(feedforward_layer.input_size(), num_tokens);
+  x = DoubleMatrix::Random(feedforward_layer.input_size(), num_tokens);
+  dx = DoubleMatrix::Zero(feedforward_layer.input_size(), num_tokens);
   feedforward_layer.SetNumInputs(1);
   feedforward_layer.SetInput(0, x);
   feedforward_layer.SetInputDerivative(0, &dx);
@@ -42,8 +42,8 @@ int main(int argc, char** argv) {
 
   rnn_layer.InitializeParameters();
   rnn_layer.ResetGradients();
-  x = Matrix::Random(rnn_layer.input_size(), num_tokens);
-  dx = Matrix::Zero(rnn_layer.input_size(), num_tokens);
+  x = DoubleMatrix::Random(rnn_layer.input_size(), num_tokens);
+  dx = DoubleMatrix::Zero(rnn_layer.input_size(), num_tokens);
   rnn_layer.SetNumInputs(1);
   rnn_layer.SetInput(0, x);
   rnn_layer.SetInputDerivative(0, &dx);
@@ -53,10 +53,12 @@ int main(int argc, char** argv) {
 
   attention_layer.InitializeParameters();
   attention_layer.ResetGradients();
-  Matrix x1 = Matrix::Random(attention_layer.input_size(), num_tokens);
-  Matrix x2 = Matrix::Random(attention_layer.control_size(), 1);
-  Matrix dx1 = Matrix::Zero(attention_layer.input_size(), num_tokens);
-  Matrix dx2 = Matrix::Zero(attention_layer.control_size(), 1);
+  DoubleMatrix x1 = DoubleMatrix::Random(attention_layer.input_size(),
+                                         num_tokens);
+  DoubleMatrix x2 = DoubleMatrix::Random(attention_layer.control_size(), 1);
+  DoubleMatrix dx1 = DoubleMatrix::Zero(attention_layer.input_size(),
+                                        num_tokens);
+  DoubleMatrix dx2 = DoubleMatrix::Zero(attention_layer.control_size(), 1);
   attention_layer.SetNumInputs(2);
   attention_layer.SetInput(0, x1);
   attention_layer.SetInput(1, x2);
@@ -68,8 +70,8 @@ int main(int argc, char** argv) {
 
   output_layer.InitializeParameters();
   output_layer.ResetGradients();
-  x = Matrix::Random(output_layer.input_size(), 1);
-  dx = Matrix::Zero(output_layer.input_size(), 1);
+  x = DoubleMatrix::Random(output_layer.input_size(), 1);
+  dx = DoubleMatrix::Zero(output_layer.input_size(), 1);
   output_layer.SetNumInputs(1);
   output_layer.SetInput(0, x);
   output_layer.SetInputDerivative(0, &dx);
@@ -79,7 +81,7 @@ int main(int argc, char** argv) {
   int l = 0;
   output_layer.set_output_label(l);
   dy->setZero(output_layer.output_size(), 1);
-  const Matrix &output = output_layer.GetOutput();
+  const DoubleMatrix &output = output_layer.GetOutput();
   (*dy)(l) = -1.0 / output(l);
   output_layer.CheckGradient(num_checks, delta);
 
