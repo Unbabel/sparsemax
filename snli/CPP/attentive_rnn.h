@@ -204,7 +204,11 @@ class RNN {
     accuracy_dev /= num_sentences_dev;
 
     write_attention_probabilities_ = true;
-    os_attention_.open("attention.txt", std::ifstream::out);
+    if (sparse_attention_) {
+      os_attention_.open("sparse_attention.txt", std::ifstream::out);
+    } else {
+      os_attention_.open("soft_attention.txt", std::ifstream::out);
+    }
 
     double accuracy_test = 0.0;
     int num_sentences_test = input_sequences_test.size();
