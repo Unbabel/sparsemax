@@ -3,6 +3,8 @@
 
 #include <vector>
 #include <cstdlib>
+#include <fstream>
+#include <iostream>
 #include <Eigen/Dense>
 #include <cmath>
 #include "utils.h"
@@ -19,7 +21,8 @@ class RNN {
       int output_size,
       bool use_attention,
       bool sparse_attention) : dictionary_(dictionary) {
-    use_ADAM_ = true;
+    write_attention_probabilities_ = false;
+    use_ADAM_ = false; //true;
     use_attention_ = use_attention;
     sparse_attention_ = sparse_attention;
     input_size_ = hidden_size; // Size of the projected embedded words.
@@ -110,9 +113,9 @@ class RNN {
     output_layer_->InitializeParameters();
 
     if (use_ADAM_) {
-      double beta1 = 0.0; //0.9;
+      double beta1 = 0.9;
       double beta2 = 0.999;
-      double epsilon = 1e-5; // 1e-8;
+      double epsilon = 1e-8; //1e-5; // 1e-8;
       linear_layer_->InitializeADAM(beta1, beta2, epsilon);
       rnn_layer_->InitializeADAM(beta1, beta2, epsilon);
       if (use_attention_) attention_layer_->InitializeADAM(beta1, beta2, epsilon);
@@ -133,7 +136,8 @@ class RNN {
              const std::vector<std::vector<Input> > &input_sequences_test,
              const std::vector<int> &output_labels_test,
              int num_epochs,
-             double learning_rate) {
+             double learning_rate,
+             double regularization_constant) {
 
     // Initial performance.
     double accuracy_dev = 0.0;
@@ -155,7 +159,7 @@ class RNN {
       TrainEpoch(input_sequences, output_labels,
                  input_sequences_dev, output_labels_dev,
                  input_sequences_test, output_labels_test,
-                 epoch, learning_rate);
+                 epoch, learning_rate, regularization_constant);
     }
   }
 
@@ -166,7 +170,8 @@ class RNN {
                   const std::vector<std::vector<Input> > &input_sequences_test,
                   const std::vector<int> &output_labels_test,
                   int epoch,
-                  double learning_rate) {
+                  double learning_rate,
+                  double regularization_constant) {
     timeval start, end;
     gettimeofday(&start, NULL);
     double total_loss = 0.0;
@@ -182,7 +187,8 @@ class RNN {
         accuracy += 1.0;
       }
       total_loss += loss;
-      RunBackwardPass(input_sequences[i], output_labels[i], learning_rate);
+      RunBackwardPass(input_sequences[i], output_labels[i], learning_rate,
+                      regularization_constant);
     }
     accuracy /= num_sentences;
 
@@ -197,6 +203,9 @@ class RNN {
     }
     accuracy_dev /= num_sentences_dev;
 
+    write_attention_probabilities_ = true;
+    os_attention_.open("attention.txt", std::ifstream::out);
+
     double accuracy_test = 0.0;
     int num_sentences_test = input_sequences_test.size();
     for (int i = 0; i < input_sequences_test.size(); ++i) {
@@ -207,6 +216,11 @@ class RNN {
       }
     }
     accuracy_test /= num_sentences_test;
+
+    write_attention_probabilities_ = false;
+    os_attention_.flush();
+    os_attention_.clear();
+    os_attention_.close();
 
     gettimeofday(&end, NULL);
     std::cout << "Epoch: " << epoch+1
@@ -300,11 +314,17 @@ class RNN {
     output_layer_->SetNumInputs(1);
     output_layer_->SetInput(0, feedforward_layer_->GetOutput());
     output_layer_->RunForward();
+
+    if (use_attention_ && write_attention_probabilities_) {
+      os_attention_ << attention_layer_->GetAttentionProbabilities().transpose()
+                    << std::endl;
+    }
   }
 
   void RunBackwardPass(const std::vector<Input> &input_sequence,
-                               int output_label,
-                               double learning_rate) {
+                       int output_label,
+                       double learning_rate,
+                       double regularization_constant) {
     // Look for the separator symbol.
     int wid_sep = dictionary_->GetWordId("__START__");
     int separator = -1;
@@ -401,7 +421,7 @@ class RNN {
       hypothesis_selector_layer_->DefineBlock(0, t, hidden_size_, 1);
       hypothesis_selector_layer_->RunBackward();
 
-   }
+    }
 
     rnn_layer_->SetInputDerivative(0, linear_layer_->GetOutputDerivative());
     rnn_layer_->RunBackward();
@@ -432,24 +452,35 @@ class RNN {
 
     // Update parameters.
     if (use_ADAM_) {
-      output_layer_->UpdateParametersADAM(learning_rate);
+      output_layer_->UpdateParametersADAM(learning_rate,
+                                          regularization_constant);
       if (use_attention_) {
-	attention_layer_->UpdateParametersADAM(learning_rate);
+        attention_layer_->UpdateParametersADAM(learning_rate,
+                                               regularization_constant);
       }
-      feedforward_layer_->UpdateParametersADAM(learning_rate);
-      rnn_layer_->UpdateParametersADAM(learning_rate);
-      linear_layer_->UpdateParametersADAM(learning_rate);
+      feedforward_layer_->UpdateParametersADAM(learning_rate,
+                                               regularization_constant);
+      rnn_layer_->UpdateParametersADAM(learning_rate,
+                                       regularization_constant);
+      linear_layer_->UpdateParametersADAM(learning_rate,
+                                          regularization_constant);
       //lookup_layer_->UpdateParameters(learning_rate);
     } else {
-      output_layer_->UpdateParameters(learning_rate);
+      output_layer_->UpdateParameters(learning_rate,
+                                      regularization_constant);
       if (use_attention_) {
-	attention_layer_->UpdateParameters(learning_rate);
+        attention_layer_->UpdateParameters(learning_rate,
+                                           regularization_constant);
       }
-      feedforward_layer_->UpdateParameters(learning_rate);
-      rnn_layer_->UpdateParameters(learning_rate);
-      linear_layer_->UpdateParameters(learning_rate);
+      feedforward_layer_->UpdateParameters(learning_rate,
+                                           regularization_constant);
+      rnn_layer_->UpdateParameters(learning_rate,
+                                   regularization_constant);
+      linear_layer_->UpdateParameters(learning_rate,
+                                      regularization_constant);
 
-      lookup_layer_->UpdateParameters(learning_rate);
+      // NOTE: no regularization_constant for the lookup layer.
+      lookup_layer_->UpdateParameters(learning_rate, 0.0);
     }
   }
 
@@ -472,6 +503,8 @@ class RNN {
   bool use_attention_;
   bool sparse_attention_;
   bool use_ADAM_;
+  bool write_attention_probabilities_;
+  std::ofstream os_attention_;
 
   //FloatMatrix x_;
   //FloatMatrix h_;

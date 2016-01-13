@@ -116,6 +116,7 @@ int main(int argc, char** argv) {
   int num_hidden_units = atoi(argv[7]);
   int num_epochs = atoi(argv[8]);
   double learning_rate = atof(argv[9]);
+  double regularization_constant = atof(argv[10]);
 
   int embedding_dimension = 300; //64;
   int word_cutoff = 1;
@@ -177,5 +178,5 @@ int main(int argc, char** argv) {
   rnn.Train(input_sequences, output_labels,
             input_sequences_dev, output_labels_dev,
             input_sequences_test, output_labels_test,
-            num_epochs, learning_rate);
+            num_epochs, learning_rate, regularization_constant);
 }

@@ -39,7 +39,8 @@ template<typename Real> class Layer {
 
   virtual double GetUniformInitializationLimit(Matrix<Real> *W) = 0;
 
-  virtual void UpdateParameters(double learning_rate) {
+  virtual void UpdateParameters(double learning_rate,
+                                double regularization_constant) {
     std::vector<Matrix<Real>*> weights, weight_derivatives;
     std::vector<Vector<Real>*> biases, bias_derivatives;
     std::vector<std::string> weight_names;
@@ -50,12 +51,14 @@ template<typename Real> class Layer {
     for (int i = 0; i < biases.size(); ++i) {
       auto b = biases[i];
       auto db = bias_derivatives[i];
+      (*db) += (regularization_constant * (*b));
       *b -= learning_rate * (*db);
     }
 
     for (int i = 0; i < weights.size(); ++i) {
       auto W = weights[i];
       auto dW = weight_derivatives[i];
+      (*dW) += (regularization_constant * (*W));
       *W -= learning_rate * (*dW);
     }
   }
@@ -93,7 +96,8 @@ template<typename Real> class Layer {
     }
   }
 
-  void UpdateParametersADAM(double learning_rate) {
+  void UpdateParametersADAM(double learning_rate,
+                            double regularization_constant) {
     std::vector<Matrix<Real>*> weights, weight_derivatives;
     std::vector<Vector<Real>*> biases, bias_derivatives;
     std::vector<std::string> weight_names;
@@ -101,56 +105,53 @@ template<typename Real> class Layer {
     CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
     CollectAllParameterDerivatives(&weight_derivatives, &bias_derivatives);
 
+    bool adagrad = false;
+    double stepsize = learning_rate *
+      sqrt(1.0 - pow(beta2_, iteration_number_ + 1)) /
+      (1.0 - pow(beta1_, iteration_number_ + 1));
+
     for (int i = 0; i < biases.size(); ++i) {
       auto b = biases[i];
       auto db = bias_derivatives[i];
 
+      (*db) += (regularization_constant * (*b));
+
       auto mb = first_bias_moments_[i];
       auto vb = second_bias_moments_[i];
 
-#if 1
-      *mb = beta1_ * (*mb) + (1.0 - beta1_) * (*db);
-      *vb = beta2_ * vb->array() + (1.0 - beta2_) * (db->array() * db->array());
-      auto mb_corrected = (*mb) / (1.0 - pow(beta1_, iteration_number_ + 1));
-      auto vb_corrected = (*vb) / (1.0 - pow(beta2_, iteration_number_ + 1));
-
-      //*b = b->array() - learning_rate * mb_corrected.array() / (epsilon_ + vb_corrected.array().sqrt());
-      double stepsize = learning_rate; // / sqrt(static_cast<double>(iteration_number_ + 1));
-      *b = b->array() - stepsize * mb_corrected.array() / (epsilon_ + vb_corrected.array().sqrt());
-#else
-      // Adagrad.
-      *vb = vb->array() + (db->array() * db->array());
-      //std::cout << epsilon_ + vb->array().sqrt() << std::endl;
-      *b = b->array() - learning_rate * db->array() / (epsilon_ + vb->array().sqrt());
-      //*b = b->array() - learning_rate * db->array();
-#endif
-
+      if (adagrad) {
+        *vb = vb->array() + (db->array() * db->array());
+        *b = b->array() - learning_rate * db->array() /
+          (epsilon_ + vb->array().sqrt());
+      } else {
+        *mb = beta1_ * (*mb) + (1.0 - beta1_) * (*db);
+        *vb = beta2_ * vb->array() +
+          (1.0 - beta2_) * (db->array() * db->array());
+        *b = b->array() - stepsize * mb->array()
+          / (epsilon_ + vb->array().sqrt());
+      }
     }
 
     for (int i = 0; i < weights.size(); ++i) {
       auto W = weights[i];
       auto dW = weight_derivatives[i];
 
+      (*dW) += (regularization_constant * (*W));
+
       auto mW = first_weight_moments_[i];
       auto vW = second_weight_moments_[i];
 
-#if 1
-      *mW = beta1_ * (*mW) + (1.0 - beta1_) * (*dW);
-      *vW = beta2_ * vW->array() + (1.0 - beta2_) * (dW->array() * dW->array());
-      auto mW_corrected = (*mW) / (1.0 - pow(beta1_, iteration_number_ + 1));
-      auto vW_corrected = (*vW) / (1.0 - pow(beta2_, iteration_number_ + 1));
-
-      //      *W = W->array() - learning_rate * mW_corrected.array() / (epsilon_ + vW_corrected.array().sqrt());
-      double stepsize = learning_rate; // / sqrt(static_cast<double>(iteration_number_ + 1));
-      *W = W->array() - stepsize * mW_corrected.array() / (epsilon_ + vW_corrected.array().sqrt());
-#else
-      // Adagrad.
-      *vW = vW->array() + (dW->array() * dW->array());
-      //std::cout << epsilon_ + vW->array().sqrt() << std::endl;
-      *W = W->array() - learning_rate * dW->array() / (epsilon_ + vW->array().sqrt());
-      //*W = W->array() - learning_rate * dW->array();
-#endif
-
+      if (adagrad) {
+        *vW = vW->array() + (dW->array() * dW->array());
+        *W = W->array() - learning_rate * dW->array() /
+          (epsilon_ + vW->array().sqrt());
+      } else {
+        *mW = beta1_ * (*mW) + (1.0 - beta1_) * (*dW);
+        *vW = beta2_ * vW->array() +
+          (1.0 - beta2_) * (dW->array() * dW->array());
+        *W = W->array() - stepsize * mW->array()
+          / (epsilon_ + vW->array().sqrt());
+      }
     }
 
     ++iteration_number_;
@@ -490,8 +491,9 @@ template<typename Real> class LookupLayer : public Layer<Real> {
   void RunBackward() {}
 
   // NOTE: this is not supporting mini-batch!!!
-  void UpdateParameters(double learning_rate) {
+  void UpdateParameters(double learning_rate, double regularization_constant) {
     // Update word embeddings.
+    assert(regularization_constant == 0.0);
     for (int t = 0; t < input_sequence_->size(); ++t) {
       int wid = (*input_sequence_)[t].wid();
       if (!updatable_[wid]) continue;
@@ -1337,6 +1339,10 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     dWxz_.noalias() += dzraw * X.transpose();
     dWyz_.noalias() += dzraw_sum * y.transpose();
     dbz_.noalias() += dzraw_sum;
+  }
+
+  const Vector<Real> &GetAttentionProbabilities() {
+    return p_;
   }
 
 #if 0
