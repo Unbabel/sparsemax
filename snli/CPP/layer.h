@@ -271,7 +271,7 @@ template<typename Real> class Layer {
           relative_error = fabs(numeric_gradient - analytic_gradient) /
             fabs(numeric_gradient + analytic_gradient);
         }
-        std::cout << name << ": "
+        std::cout << name << "(" << r << "/" << W->size() << ")" << ": "
                   << numeric_gradient << ", " << analytic_gradient
                   << " => " << relative_error
                   << std::endl;
@@ -934,6 +934,161 @@ template<typename Real> class RNNLayer : public Layer<Real> {
   Vector<Real> dh0_;
 };
 
+template<typename Real> class BiRNNLayer : public RNNLayer<Real> {
+ public:
+  BiRNNLayer() {}
+  BiRNNLayer(int input_size,
+           int hidden_size) {
+    this->name_ = "BiRNN";
+    this->activation_function_ = ActivationFunctions::TANH;
+    this->input_size_ = input_size;
+    this->hidden_size_ = hidden_size;
+    this->use_hidden_start_ = true;
+  }
+  virtual ~BiRNNLayer() {}
+
+  void ResetParameters() {
+    RNNLayer<Real>::ResetParameters();
+
+    Wxl_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
+    Wll_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
+    bl_ = Vector<Real>::Zero(this->hidden_size_);
+    if (this->use_hidden_start_) {
+      l0_ = Vector<Real>::Zero(this->hidden_size_);
+    }
+  }
+
+  void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
+			    std::vector<Vector<Real>*> *biases,
+			    std::vector<std::string> *weight_names,
+			    std::vector<std::string> *bias_names) {
+    RNNLayer<Real>::CollectAllParameters(weights, biases, weight_names,
+					 bias_names);
+
+    weights->push_back(&Wxl_);
+    weights->push_back(&Wll_);
+
+    biases->push_back(&bl_);
+    if (this->use_hidden_start_) {
+      biases->push_back(&l0_); // Not really a bias, but it goes here.
+    }
+
+    weight_names->push_back("Wxl");
+    weight_names->push_back("Wll");
+
+    bias_names->push_back("bl");
+    if (this->use_hidden_start_) {
+      bias_names->push_back("l0");
+    }
+  }
+
+  void CollectAllParameterDerivatives(
+      std::vector<Matrix<Real>*> *weight_derivatives,
+      std::vector<Vector<Real>*> *bias_derivatives) {
+    RNNLayer<Real>::CollectAllParameterDerivatives(weight_derivatives,
+                                                   bias_derivatives);
+    weight_derivatives->push_back(&dWxl_);
+    weight_derivatives->push_back(&dWll_);
+    bias_derivatives->push_back(&dbl_);
+    if (this->use_hidden_start_) {
+      bias_derivatives->push_back(&dl0_); // Not really a bias, but goes here.
+    }
+  }
+
+  void ResetGradients() {
+    RNNLayer<Real>::ResetGradients();
+    dWxl_.setZero(this->hidden_size_, this->input_size_);
+    dbl_.setZero(this->hidden_size_);
+    dWll_.setZero(this->hidden_size_, this->hidden_size_);
+    if (this->use_hidden_start_) {
+      dl0_.setZero(this->hidden_size_);
+    }
+  }
+
+  void RunForward() {
+    const Matrix<Real> &x = this->GetInput();
+    int length = x.cols();
+    this->output_.setZero(2*this->hidden_size_, length);
+    Matrix<Real> hraw = (this->Wxh_ * x).colwise() + this->bh_;
+    Matrix<Real> lraw = (Wxl_ * x).colwise() + bl_;
+    Vector<Real> hprev = Vector<Real>::Zero(this->hidden_size_);
+    Vector<Real> lnext = Vector<Real>::Zero(this->hidden_size_);
+    if (this->use_hidden_start_) {
+      hprev = this->h0_;
+      lnext = l0_;
+    }
+    Vector<Real> result;
+    for (int t = 0; t < length; ++t) {
+      Vector<Real> tmp = hraw.col(t) + this->Whh_ * hprev;
+      EvaluateActivation(this->activation_function_,
+                         tmp,
+                         &result);
+      this->output_.block(0, t, this->hidden_size_, 1) = result;
+      hprev = result;
+    }
+    for (int t = length-1; t >= 0; --t) {
+      Vector<Real> tmp = lraw.col(t) + Wll_ * lnext;
+      EvaluateActivation(this->activation_function_,
+                         tmp,
+                         &result);
+      this->output_.block(this->hidden_size_, t, this->hidden_size_, 1) = result;
+      lnext = result;
+    }
+  }
+
+  void RunBackward() {
+    const Matrix<Real> &x = this->GetInput();
+    Matrix<Real> *dx = this->GetInputDerivative();
+
+    Vector<Real> dhnext = Vector<Real>::Zero(this->Whh_.rows());
+    Vector<Real> dlprev = Vector<Real>::Zero(Wll_.rows());
+
+    int length = this->output_.cols();
+    Matrix<Real> result;
+    DerivateActivation(this->activation_function_, this->output_, &result);
+    Matrix<Real> dhraw = result.block(0, 0, this->hidden_size_, length);
+    Matrix<Real> dlraw = result.block(this->hidden_size_, 0, this->hidden_size_, length);
+
+    for (int t = length - 1; t >= 0; --t) {
+      Vector<Real> dh = this->output_derivative_.block(0, t, this->hidden_size_, 1) + dhnext; // Backprop into h.
+      dhraw.col(t) = dhraw.col(t).array() * dh.array();
+      dhnext.noalias() = this->Whh_.transpose() * dhraw.col(t);
+    }
+
+    for (int t = 0; t < length; ++t) {
+      Vector<Real> dl = this->output_derivative_.block(this->hidden_size_, t, this->hidden_size_, 1) + dlprev; // Backprop into h.
+      dlraw.col(t) = dlraw.col(t).array() * dl.array();
+      dlprev.noalias() = Wll_.transpose() * dlraw.col(t);
+    }
+
+    *dx += this->Wxh_.transpose() * dhraw; // Backprop into x.
+    *dx += Wxl_.transpose() * dlraw; // Backprop into x.
+
+    this->dWxh_.noalias() += dhraw * x.transpose();
+    this->dbh_.noalias() += dhraw.rowwise().sum();
+    this->dWhh_.noalias() += dhraw.rightCols(length-1) *
+      this->output_.block(0, 0, this->hidden_size_, length-1).transpose();
+    this->dh0_.noalias() += dhnext;
+
+    dWxl_.noalias() += dlraw * x.transpose();
+    dbl_.noalias() += dlraw.rowwise().sum();
+    dWll_.noalias() += dlraw.leftCols(length-1) *
+      this->output_.block(this->hidden_size_, 1, this->hidden_size_, length-1).transpose();
+    dl0_.noalias() += dlprev;
+  }
+
+ protected:
+  Matrix<Real> Wxl_;
+  Matrix<Real> Wll_;
+  Vector<Real> bl_;
+  Vector<Real> l0_;
+
+  Matrix<Real> dWxl_;
+  Matrix<Real> dWll_;
+  Vector<Real> dbl_;
+  Vector<Real> dl0_;
+};
+
 template<typename Real> class GRULayer : public RNNLayer<Real> {
  public:
   GRULayer() {}
@@ -947,7 +1102,7 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
   }
   virtual ~GRULayer() {}
 
-  void ResetParameters() {
+  virtual void ResetParameters() {
     RNNLayer<Real>::ResetParameters();
 
     Wxz_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
@@ -958,10 +1113,10 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     br_ = Vector<Real>::Zero(this->hidden_size_);
   }
 
-  void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
-                            std::vector<Vector<Real>*> *biases,
-                            std::vector<std::string> *weight_names,
-                            std::vector<std::string> *bias_names) {
+  virtual void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
+				    std::vector<Vector<Real>*> *biases,
+				    std::vector<std::string> *weight_names,
+				    std::vector<std::string> *bias_names) {
     RNNLayer<Real>::CollectAllParameters(weights, biases, weight_names,
                                          bias_names);
 
@@ -982,7 +1137,7 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     bias_names->push_back("br");
   }
 
-  void CollectAllParameterDerivatives(
+  virtual void CollectAllParameterDerivatives(
       std::vector<Matrix<Real>*> *weight_derivatives,
       std::vector<Vector<Real>*> *bias_derivatives) {
     RNNLayer<Real>::CollectAllParameterDerivatives(weight_derivatives,
@@ -995,7 +1150,7 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     bias_derivatives->push_back(&dbr_);
   }
 
-  double GetUniformInitializationLimit(Matrix<Real> *W) {
+  virtual double GetUniformInitializationLimit(Matrix<Real> *W) {
     int num_outputs = W->rows();
     int num_inputs = W->cols();
     double coeff;
@@ -1009,7 +1164,7 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     return coeff * sqrt(6.0 / (num_inputs + num_outputs));
   }
 
-  void ResetGradients() {
+  virtual void ResetGradients() {
     RNNLayer<Real>::ResetGradients();
     dWxz_.setZero(this->hidden_size_, this->input_size_);
     dWhz_.setZero(this->hidden_size_, this->hidden_size_);
@@ -1019,7 +1174,7 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     dbr_.setZero(this->hidden_size_);
   }
 
-  void RunForward() {
+  virtual void RunForward() {
     const Matrix<Real> &x = this->GetInput();
 
     int length = x.cols();
@@ -1057,7 +1212,7 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     }
   }
 
-  void RunBackward() {
+  virtual void RunBackward() {
     const Matrix<Real> &x = this->GetInput();
     Matrix<Real> *dx = this->GetInputDerivative();
 
@@ -1149,6 +1304,339 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
   Matrix<Real> z_;
   Matrix<Real> r_;
   Matrix<Real> hu_;
+};
+
+template<typename Real> class BiGRULayer : public GRULayer<Real> {
+ public:
+  BiGRULayer() {}
+  BiGRULayer(int input_size,
+           int hidden_size) {
+    this->name_ = "BiGRU";
+    this->activation_function_ = ActivationFunctions::TANH;
+    this->input_size_ = input_size;
+    this->hidden_size_ = hidden_size;
+    this->use_hidden_start_ = true;
+  }
+  virtual ~BiGRULayer() {}
+
+  void ResetParameters() {
+    GRULayer<Real>::ResetParameters();
+
+    Wxl_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
+    Wll_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
+    Wxz_r_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
+    Wlz_r_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
+    Wxr_r_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
+    Wlr_r_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
+    bl_ = Vector<Real>::Zero(this->hidden_size_);
+    bz_r_ = Vector<Real>::Zero(this->hidden_size_);
+    br_r_ = Vector<Real>::Zero(this->hidden_size_);
+    if (this->use_hidden_start_) {
+      l0_ = Vector<Real>::Zero(this->hidden_size_);
+    }
+  }
+
+  void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
+                            std::vector<Vector<Real>*> *biases,
+                            std::vector<std::string> *weight_names,
+                            std::vector<std::string> *bias_names) {
+    GRULayer<Real>::CollectAllParameters(weights, biases, weight_names,
+                                         bias_names);
+
+    weights->push_back(&Wxl_);
+    weights->push_back(&Wll_);
+    weights->push_back(&Wxz_r_);
+    weights->push_back(&Wlz_r_);
+    weights->push_back(&Wxr_r_);
+    weights->push_back(&Wlr_r_);
+
+    biases->push_back(&bl_);
+    biases->push_back(&bz_r_);
+    biases->push_back(&br_r_);
+    if (this->use_hidden_start_) {
+      biases->push_back(&l0_);
+    }
+
+    weight_names->push_back("Wxl");
+    weight_names->push_back("Wll");
+    weight_names->push_back("Wxz_r");
+    weight_names->push_back("Wlz_r");
+    weight_names->push_back("Wxr_r");
+    weight_names->push_back("Wlr_r");
+
+    bias_names->push_back("bl");
+    bias_names->push_back("bz_r");
+    bias_names->push_back("br_r");
+    if (this->use_hidden_start_) {
+      bias_names->push_back("l0");
+    }
+  }
+
+  void CollectAllParameterDerivatives(
+      std::vector<Matrix<Real>*> *weight_derivatives,
+      std::vector<Vector<Real>*> *bias_derivatives) {
+    GRULayer<Real>::CollectAllParameterDerivatives(weight_derivatives,
+                                                   bias_derivatives);
+    weight_derivatives->push_back(&dWxl_);
+    weight_derivatives->push_back(&dWll_);
+    weight_derivatives->push_back(&dWxz_r_);
+    weight_derivatives->push_back(&dWlz_r_);
+    weight_derivatives->push_back(&dWxr_r_);
+    weight_derivatives->push_back(&dWlr_r_);
+    bias_derivatives->push_back(&dbl_);
+    bias_derivatives->push_back(&dbz_r_);
+    bias_derivatives->push_back(&dbr_r_);
+    if (this->use_hidden_start_) {
+      bias_derivatives->push_back(&dl0_);
+    }
+  }
+
+  double GetUniformInitializationLimit(Matrix<Real> *W) {
+    int num_outputs = W->rows();
+    int num_inputs = W->cols();
+    double coeff;
+    // Weights controlling gates have logistic activations.
+    if (this->activation_function_ == ActivationFunctions::LOGISTIC ||
+        W == &this->Wxz_ || W == &this->Whz_ || W == &this->Wxr_ || W == &this->Whr_ ||
+        W == &this->Wxz_r_ || W == &this->Wlz_r_ || W == &this->Wxr_r_ || W == &this->Wlr_r_) {
+      coeff = 4.0;
+    } else {
+      coeff = 1.0;
+    }
+    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
+  }
+
+  void ResetGradients() {
+    GRULayer<Real>::ResetGradients();
+    dWxl_.setZero(this->hidden_size_, this->input_size_);
+    dWll_.setZero(this->hidden_size_, this->hidden_size_);
+    dWxz_r_.setZero(this->hidden_size_, this->input_size_);
+    dWlz_r_.setZero(this->hidden_size_, this->hidden_size_);
+    dWxr_r_.setZero(this->hidden_size_, this->input_size_);
+    dWlr_r_.setZero(this->hidden_size_, this->hidden_size_);
+    dbl_.setZero(this->hidden_size_);
+    dbz_r_.setZero(this->hidden_size_);
+    dbr_r_.setZero(this->hidden_size_);
+    if (this->use_hidden_start_) {
+      dl0_.setZero(this->hidden_size_);
+    }
+  }
+
+  void RunForward() {
+    const Matrix<Real> &x = this->GetInput();
+
+    int length = x.cols();
+
+    this->z_.setZero(this->hidden_size_, length);
+    this->r_.setZero(this->hidden_size_, length);
+    this->hu_.setZero(this->hidden_size_, length);
+    z_r_.setZero(this->hidden_size_, length);
+    r_r_.setZero(this->hidden_size_, length);
+    lu_.setZero(this->hidden_size_, length);
+
+    this->output_.setZero(2*this->hidden_size_, length);
+
+    Matrix<Real> zraw = (this->Wxz_ * x).colwise() + this->bz_;
+    Matrix<Real> rraw = (this->Wxr_ * x).colwise() + this->br_;
+    Matrix<Real> hraw = (this->Wxh_ * x).colwise() + this->bh_;
+    Matrix<Real> zraw_r = (Wxz_r_ * x).colwise() + bz_r_;
+    Matrix<Real> rraw_r = (Wxr_r_ * x).colwise() + br_r_;
+    Matrix<Real> lraw = (Wxl_ * x).colwise() + bl_;
+    Vector<Real> hprev = Vector<Real>::Zero(this->hidden_size_);
+    Vector<Real> lnext = Vector<Real>::Zero(this->hidden_size_);
+    if (this->use_hidden_start_) {
+      hprev = this->h0_;
+      lnext = l0_;
+    }
+    Vector<Real> result;
+    Vector<Real> tmp;
+    for (int t = 0; t < length; ++t) {
+      tmp = zraw.col(t) + this->Whz_ * hprev;
+      EvaluateActivation(ActivationFunctions::LOGISTIC,
+                         tmp,
+                         &result);
+      this->z_.col(t) = result;
+
+      tmp = rraw.col(t) + this->Whr_ * hprev;
+      EvaluateActivation(ActivationFunctions::LOGISTIC,
+                         tmp,
+                         &result);
+      this->r_.col(t) = result;
+
+      tmp = hraw.col(t) + this->Whh_ * this->r_.col(t).cwiseProduct(hprev);
+      EvaluateActivation(this->activation_function_,
+                         tmp,
+                         &result);
+      this->hu_.col(t) = result;
+      this->output_.block(0, t, this->hidden_size_, 1) =
+	this->z_.col(t).cwiseProduct(this->hu_.col(t) - hprev) + hprev;
+      hprev = this->output_.block(0, t, this->hidden_size_, 1);
+    }
+    for (int t = length-1; t >= 0; --t) {
+      tmp = zraw_r.col(t) + Wlz_r_ * lnext;
+      EvaluateActivation(ActivationFunctions::LOGISTIC,
+                         tmp,
+                         &result);
+      z_r_.col(t) = result;
+
+      tmp = rraw_r.col(t) + Wlr_r_ * lnext;
+      EvaluateActivation(ActivationFunctions::LOGISTIC,
+                         tmp,
+                         &result);
+      r_r_.col(t) = result;
+
+      tmp = lraw.col(t) + Wll_ * r_r_.col(t).cwiseProduct(lnext);
+      EvaluateActivation(this->activation_function_,
+                         tmp,
+                         &result);
+      lu_.col(t) = result;
+      this->output_.block(this->hidden_size_, t, this->hidden_size_, 1) =
+	z_r_.col(t).cwiseProduct(lu_.col(t) - lnext) + lnext;
+      lnext = this->output_.block(this->hidden_size_, t, this->hidden_size_, 1);
+    }
+  }
+
+  void RunBackward() {
+    const Matrix<Real> &x = this->GetInput();
+    Matrix<Real> *dx = this->GetInputDerivative();
+
+    Vector<Real> dhnext = Vector<Real>::Zero(this->Whh_.rows());
+    Vector<Real> dlprev = Vector<Real>::Zero(Wll_.rows());
+    //const Matrix<Real> &dy = this->output_derivative_;
+
+    int length = this->output_.cols();
+    Matrix<Real> dhuraw;
+    DerivateActivation(this->activation_function_, this->hu_, &dhuraw);
+    Matrix<Real> dzraw;
+    DerivateActivation(ActivationFunctions::LOGISTIC, this->z_, &dzraw);
+    Matrix<Real> drraw;
+    DerivateActivation(ActivationFunctions::LOGISTIC, this->r_, &drraw);
+    Matrix<Real> dluraw;
+    DerivateActivation(this->activation_function_, lu_, &dluraw);
+    Matrix<Real> dzraw_r;
+    DerivateActivation(ActivationFunctions::LOGISTIC, z_r_, &dzraw_r);
+    Matrix<Real> drraw_r;
+    DerivateActivation(ActivationFunctions::LOGISTIC, r_r_, &drraw_r);
+
+    for (int t = length - 1; t >= 0; --t) {
+      Vector<Real> dh = this->output_derivative_.block(0, t, this->hidden_size_, 1) + dhnext; // Backprop into h.
+      Vector<Real> dhu = this->z_.col(t).cwiseProduct(dh);
+
+      dhuraw.col(t) = dhuraw.col(t).cwiseProduct(dhu);
+      Vector<Real> hprev;
+      if (t == 0) {
+        hprev = Vector<Real>::Zero(this->hidden_size_);
+      } else {
+        hprev = this->output_.block(0, t-1, this->hidden_size_, 1);
+      }
+
+      Vector<Real> dq = this->Whh_.transpose() * dhuraw.col(t);
+      Vector<Real> dz = (this->hu_.col(t) - hprev).cwiseProduct(dh);
+      Vector<Real> dr = hprev.cwiseProduct(dq);
+
+      dzraw.col(t) = dzraw.col(t).cwiseProduct(dz);
+      drraw.col(t) = drraw.col(t).cwiseProduct(dr);
+
+      dhnext.noalias() =
+        this->Whz_.transpose() * dzraw.col(t) +
+        this->Whr_.transpose() * drraw.col(t) +
+        this->r_.col(t).cwiseProduct(dq) +
+        (1.0 - this->z_.col(t).array()).matrix().cwiseProduct(dh);
+    }
+
+    for (int t = 0; t < length; ++t) {
+      Vector<Real> dl = this->output_derivative_.block(this->hidden_size_, t, this->hidden_size_, 1) + dlprev; // Backprop into h.
+      Vector<Real> dlu = z_r_.col(t).cwiseProduct(dl);
+
+      dluraw.col(t) = dluraw.col(t).cwiseProduct(dlu);
+      Vector<Real> lnext;
+      if (t == length-1) {
+        lnext = Vector<Real>::Zero(this->hidden_size_);
+      } else {
+        lnext = this->output_.block(this->hidden_size_, t+1, this->hidden_size_, 1);
+      }
+
+      Vector<Real> dq_r = this->Wll_.transpose() * dluraw.col(t);
+      Vector<Real> dz_r = (lu_.col(t) - lnext).cwiseProduct(dl);
+      Vector<Real> dr_r = lnext.cwiseProduct(dq_r);
+
+      dzraw_r.col(t) = dzraw_r.col(t).cwiseProduct(dz_r);
+      drraw_r.col(t) = drraw_r.col(t).cwiseProduct(dr_r);
+
+      dlprev.noalias() =
+        Wlz_r_.transpose() * dzraw_r.col(t) +
+        Wlr_r_.transpose() * drraw_r.col(t) +
+        r_r_.col(t).cwiseProduct(dq_r) +
+        (1.0 - z_r_.col(t).array()).matrix().cwiseProduct(dl);
+    }
+
+    *dx += this->Wxz_.transpose() * dzraw + this->Wxr_.transpose() * drraw +
+      this->Wxh_.transpose() * dhuraw; // Backprop into x.
+    *dx += Wxz_r_.transpose() * dzraw_r + Wxr_r_.transpose() * drraw_r +
+      Wxl_.transpose() * dluraw; // Backprop into x.
+
+    this->dWxz_.noalias() += dzraw * x.transpose();
+    this->dbz_.noalias() += dzraw.rowwise().sum();
+    this->dWxr_.noalias() += drraw * x.transpose();
+    this->dbr_.noalias() += drraw.rowwise().sum();
+    this->dWxh_.noalias() += dhuraw * x.transpose();
+    this->dbh_.noalias() += dhuraw.rowwise().sum();
+
+    dWxz_r_.noalias() += dzraw_r * x.transpose();
+    dbz_r_.noalias() += dzraw_r.rowwise().sum();
+    dWxr_r_.noalias() += drraw_r * x.transpose();
+    dbr_r_.noalias() += drraw_r.rowwise().sum();
+    dWxl_.noalias() += dluraw * x.transpose();
+    dbl_.noalias() += dluraw.rowwise().sum();
+
+    this->dWhz_.noalias() += dzraw.rightCols(length-1) *
+      this->output_.block(0, 0, this->hidden_size_, length-1).transpose();
+    this->dWhr_.noalias() += drraw.rightCols(length-1) *
+      this->output_.block(0, 0, this->hidden_size_, length-1).transpose();
+    this->dWhh_.noalias() += dhuraw.rightCols(length-1) *
+      ((this->r_.rightCols(length-1)).cwiseProduct(this->output_.block(0, 0, this->hidden_size_, length-1))).
+      transpose();
+
+    dWlz_r_.noalias() += dzraw_r.leftCols(length-1) *
+      this->output_.block(this->hidden_size_, 1, this->hidden_size_, length-1).transpose();
+    dWlr_r_.noalias() += drraw_r.leftCols(length-1) *
+      this->output_.block(this->hidden_size_, 1, this->hidden_size_, length-1).transpose();
+    dWll_.noalias() += dluraw.leftCols(length-1) *
+      ((r_r_.leftCols(length-1)).cwiseProduct(this->output_.block(this->hidden_size_, 1, this->hidden_size_, length-1))).
+      transpose();
+
+    this->dh0_.noalias() += dhnext;
+    this->dl0_.noalias() += dlprev;
+
+    //std::cout << "dl0=" << this->dl0_ << std::endl;
+  }
+
+ protected:
+  Matrix<Real> Wxl_;
+  Matrix<Real> Wll_;
+  Matrix<Real> Wxz_r_;
+  Matrix<Real> Wlz_r_;
+  Matrix<Real> Wxr_r_;
+  Matrix<Real> Wlr_r_;
+  Vector<Real> bl_;
+  Vector<Real> bz_r_;
+  Vector<Real> br_r_;
+  Vector<Real> l0_;
+
+  Matrix<Real> dWxl_;
+  Matrix<Real> dWll_;
+  Matrix<Real> dWxz_r_;
+  Matrix<Real> dWlz_r_;
+  Matrix<Real> dWxr_r_;
+  Matrix<Real> dWlr_r_;
+  Vector<Real> dbl_;
+  Vector<Real> dbz_r_;
+  Vector<Real> dbr_r_;
+  Vector<Real> dl0_;
+
+  Matrix<Real> z_r_;
+  Matrix<Real> r_r_;
+  Matrix<Real> lu_;
 };
 
 template<typename Real> class AttentionLayer : public Layer<Real> {

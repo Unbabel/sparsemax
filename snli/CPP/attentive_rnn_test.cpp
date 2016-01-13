@@ -7,12 +7,13 @@ int main(int argc, char** argv) {
 
   LinearLayer<double> linear_layer(5, 5);
   GRULayer<double> rnn_layer(5, 5);
+  BiGRULayer<double> birnn_layer(5, 5);
   AttentionLayer<double> attention_layer(5, 5, 5, true);
   FeedforwardLayer<double> feedforward_layer(5, 5);
   SoftmaxOutputLayer<double> output_layer(5, 3);
 
-  double delta = 1e-7;
-  int num_checks = 20;
+  double delta = 1e-8; //1e-7;
+  int num_checks = 50;
   int num_tokens = 4;
 
   DoubleMatrix x, dx;
@@ -52,6 +53,17 @@ int main(int argc, char** argv) {
   dy = rnn_layer.GetOutputDerivative();
   dy->setRandom(rnn_layer.hidden_size(), num_tokens);
   rnn_layer.CheckGradient(num_checks, delta);
+
+  birnn_layer.InitializeParameters();
+  birnn_layer.ResetGradients();
+  x = DoubleMatrix::Random(birnn_layer.input_size(), num_tokens);
+  dx = DoubleMatrix::Zero(birnn_layer.input_size(), num_tokens);
+  birnn_layer.SetNumInputs(1);
+  birnn_layer.SetInput(0, x);
+  birnn_layer.SetInputDerivative(0, &dx);
+  dy = birnn_layer.GetOutputDerivative();
+  dy->setRandom(2*birnn_layer.hidden_size(), num_tokens);
+  birnn_layer.CheckGradient(num_checks, delta);
 
   attention_layer.InitializeParameters();
   attention_layer.ResetGradients();

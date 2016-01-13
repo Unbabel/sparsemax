@@ -25,6 +25,7 @@ class RNN {
     use_ADAM_ = false; //true;
     use_attention_ = use_attention;
     sparse_attention_ = sparse_attention;
+    use_bidirectional_rnns_ = true;
     input_size_ = hidden_size; // Size of the projected embedded words.
     hidden_size_ = hidden_size;
     output_size_ = output_size;
@@ -32,15 +33,25 @@ class RNN {
     lookup_layer_ = new LookupLayer<float>(dictionary->GetNumWords(),
                                            embedding_dimension);
     linear_layer_ = new LinearLayer<float>(embedding_dimension, input_size_);
+
     //rnn_layer_ = new RNNLayer(input_size_, hidden_size);
-    rnn_layer_ = new GRULayer<float>(input_size_, hidden_size);
+    int state_size;
+    if (use_bidirectional_rnns_) {
+      rnn_layer_ = new BiGRULayer<float>(input_size_, hidden_size);
+      state_size = 2*hidden_size;
+    } else {
+      rnn_layer_ = new GRULayer<float>(input_size_, hidden_size);
+      state_size = hidden_size;
+    }
+
     if (use_attention_) {
-      attention_layer_ = new AttentionLayer<float>(hidden_size, hidden_size,
-                                                   hidden_size,
-                                                   sparse_attention_);
+      attention_layer_ = new AttentionLayer<float>(state_size, state_size,
+						   hidden_size,
+						   sparse_attention_);
     } else {
       attention_layer_ = NULL;
     }
+    
     hypothesis_selector_layer_ = new SelectorLayer<float>;
     if (use_attention_) {
       premise_extractor_layer_ = new SelectorLayer<float>;
@@ -50,7 +61,7 @@ class RNN {
       premise_selector_layer_ = new SelectorLayer<float>;
     }
     concatenator_layer_ = new ConcatenatorLayer<float>;
-    feedforward_layer_ = new FeedforwardLayer<float>(2*hidden_size,
+    feedforward_layer_ = new FeedforwardLayer<float>(2*state_size,
                                                      hidden_size);
     output_layer_ = new SoftmaxOutputLayer<float>(hidden_size, output_size);
   }
@@ -205,9 +216,9 @@ class RNN {
 
     write_attention_probabilities_ = true;
     if (sparse_attention_) {
-      os_attention_.open("sparse_attention.txt", std::ifstream::out);
+      os_attention_.open("sparse_attention_bi.txt", std::ifstream::out);
     } else {
-      os_attention_.open("soft_attention.txt", std::ifstream::out);
+      os_attention_.open("soft_attention_bi.txt", std::ifstream::out);
     }
 
     double accuracy_test = 0.0;
@@ -267,16 +278,27 @@ class RNN {
 
     int t = input_sequence.size() - 1;
 
+    int state_size;
+    if (use_bidirectional_rnns_) {
+      state_size = 2*hidden_size_;
+    } else {
+      state_size = hidden_size_;
+    }
+
     if (use_attention_) {
 
       premise_extractor_layer_->SetNumInputs(1);
       premise_extractor_layer_->SetInput(0, rnn_layer_->GetOutput());
-      premise_extractor_layer_->DefineBlock(0, 0, hidden_size_, separator);
+      premise_extractor_layer_->DefineBlock(0, 0, state_size, separator);
       premise_extractor_layer_->RunForward();
 
       hypothesis_selector_layer_->SetNumInputs(1);
       hypothesis_selector_layer_->SetInput(0, rnn_layer_->GetOutput());
-      hypothesis_selector_layer_->DefineBlock(0, t, hidden_size_, 1);
+      if (use_bidirectional_rnns_) {
+	hypothesis_selector_layer_->DefineBlock(0, (t+separator)/2, state_size, 1); // CHANGE THIS!!!
+      } else {
+	hypothesis_selector_layer_->DefineBlock(0, t, state_size, 1);
+      }
       hypothesis_selector_layer_->RunForward();
 
       attention_layer_->SetNumInputs(2);
@@ -297,12 +319,12 @@ class RNN {
 
       premise_selector_layer_->SetNumInputs(1);
       premise_selector_layer_->SetInput(0, rnn_layer_->GetOutput());
-      premise_selector_layer_->DefineBlock(0, separator, hidden_size_, 1);
+      premise_selector_layer_->DefineBlock(0, separator, state_size, 1);
       premise_selector_layer_->RunForward();
 
       hypothesis_selector_layer_->SetNumInputs(1);
       hypothesis_selector_layer_->SetInput(0, rnn_layer_->GetOutput());
-      hypothesis_selector_layer_->DefineBlock(0, t, hidden_size_, 1);
+      hypothesis_selector_layer_->DefineBlock(0, t, state_size, 1);
       hypothesis_selector_layer_->RunForward();
 
       concatenator_layer_->SetNumInputs(2);
@@ -339,6 +361,13 @@ class RNN {
 
     int t = input_sequence.size() - 1;
 
+    int state_size;
+    if (use_bidirectional_rnns_) {
+      state_size = 2*hidden_size_;
+    } else {
+      state_size = hidden_size_;
+    }
+
     // Reset parameter gradients.
     output_layer_->ResetGradients();
     feedforward_layer_->ResetGradients();
@@ -351,19 +380,19 @@ class RNN {
 
     // Reset variable derivatives.
     feedforward_layer_->GetOutputDerivative()->setZero(hidden_size_, 1);
-    concatenator_layer_->GetOutputDerivative()->setZero(2*hidden_size_, 1);
+    concatenator_layer_->GetOutputDerivative()->setZero(2*state_size, 1);
     if (use_attention_) {
-      attention_layer_->GetOutputDerivative()->setZero(hidden_size_, 1);
-      premise_extractor_layer_->GetOutputDerivative()->setZero(hidden_size_,
+      attention_layer_->GetOutputDerivative()->setZero(state_size, 1);
+      premise_extractor_layer_->GetOutputDerivative()->setZero(state_size,
                                                                separator);
-      hypothesis_selector_layer_->GetOutputDerivative()->setZero(hidden_size_,
+      hypothesis_selector_layer_->GetOutputDerivative()->setZero(state_size,
                                                                  1);
     } else {
-      premise_selector_layer_->GetOutputDerivative()->setZero(hidden_size_, 1);
-      hypothesis_selector_layer_->GetOutputDerivative()->setZero(hidden_size_,
+      premise_selector_layer_->GetOutputDerivative()->setZero(state_size, 1);
+      hypothesis_selector_layer_->GetOutputDerivative()->setZero(state_size,
                                                                  1);
     }
-    rnn_layer_->GetOutputDerivative()->setZero(hidden_size_,
+    rnn_layer_->GetOutputDerivative()->setZero(state_size,
                                                input_sequence.size());
     linear_layer_->GetOutputDerivative()->setZero(GetInputSize(),
                                                   input_sequence.size());
@@ -398,12 +427,16 @@ class RNN {
 
       premise_extractor_layer_->
         SetInputDerivative(0, rnn_layer_->GetOutputDerivative());
-      premise_extractor_layer_->DefineBlock(0, 0, hidden_size_, separator);
+      premise_extractor_layer_->DefineBlock(0, 0, state_size, separator);
       premise_extractor_layer_->RunBackward();
 
       hypothesis_selector_layer_->
         SetInputDerivative(0, rnn_layer_->GetOutputDerivative());
-      hypothesis_selector_layer_->DefineBlock(0, t, hidden_size_, 1);
+      if (use_bidirectional_rnns_) {
+	hypothesis_selector_layer_->DefineBlock(0, (t+separator)/2, state_size, 1); // CHANGE THIS!!!
+      } else {
+	hypothesis_selector_layer_->DefineBlock(0, t, state_size, 1);
+      }
       hypothesis_selector_layer_->RunBackward();
 
     } else {
@@ -417,12 +450,12 @@ class RNN {
 
       premise_selector_layer_->
         SetInputDerivative(0, rnn_layer_->GetOutputDerivative());
-      premise_selector_layer_->DefineBlock(0, separator, hidden_size_, 1);
+      premise_selector_layer_->DefineBlock(0, separator, state_size, 1);
       premise_selector_layer_->RunBackward();
 
       hypothesis_selector_layer_->
         SetInputDerivative(0, rnn_layer_->GetOutputDerivative());
-      hypothesis_selector_layer_->DefineBlock(0, t, hidden_size_, 1);
+      hypothesis_selector_layer_->DefineBlock(0, t, state_size, 1);
       hypothesis_selector_layer_->RunBackward();
 
     }
@@ -506,6 +539,7 @@ class RNN {
   int output_size_;
   bool use_attention_;
   bool sparse_attention_;
+  bool use_bidirectional_rnns_;
   bool use_ADAM_;
   bool write_attention_probabilities_;
   std::ofstream os_attention_;
