@@ -25,9 +25,10 @@ class RNN {
     use_ADAM_ = false; //true;
     use_attention_ = use_attention;
     sparse_attention_ = sparse_attention;
+    use_lstms_ = true; //false;
     use_bidirectional_rnns_ = false;
-    use_linear_layer_after_rnn_ = true;
-    use_average_layer_ = true;
+    use_linear_layer_after_rnn_ = false; //true;
+    use_average_layer_ = false; //true;
     input_size_ = hidden_size; // Size of the projected embedded words.
     hidden_size_ = hidden_size;
     output_size_ = output_size;
@@ -42,7 +43,11 @@ class RNN {
       rnn_layer_ = new BiGRULayer<float>(input_size_, hidden_size);
       state_size = 2*hidden_size;
     } else {
-      rnn_layer_ = new GRULayer<float>(input_size_, hidden_size);
+      if (use_lstms_) {
+	rnn_layer_ = new LSTMLayer<float>(input_size_, hidden_size);
+      } else {
+	rnn_layer_ = new GRULayer<float>(input_size_, hidden_size);
+      }
       state_size = hidden_size;
     }
 
@@ -243,9 +248,9 @@ class RNN {
 
     write_attention_probabilities_ = true;
     if (sparse_attention_) {
-      os_attention_.open("sparse_attention_bi.txt", std::ifstream::out);
+      os_attention_.open("sparse_attention_lstms.txt", std::ifstream::out);
     } else {
-      os_attention_.open("soft_attention_bi.txt", std::ifstream::out);
+      os_attention_.open("soft_attention_lstms.txt", std::ifstream::out);
     }
 
     double accuracy_test = 0.0;
@@ -673,6 +678,7 @@ class RNN {
   int output_size_;
   bool use_attention_;
   bool sparse_attention_;
+  bool use_lstms_;
   bool use_bidirectional_rnns_;
   bool use_linear_layer_after_rnn_;
   bool use_average_layer_;

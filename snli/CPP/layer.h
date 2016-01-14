@@ -1340,6 +1340,301 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
   Matrix<Real> hu_;
 };
 
+template<typename Real> class LSTMLayer : public RNNLayer<Real> {
+ public:
+  LSTMLayer() {}
+  LSTMLayer(int input_size,
+	    int hidden_size) {
+    this->name_ = "LSTM";
+    this->activation_function_ = ActivationFunctions::TANH;
+    this->input_size_ = input_size;
+    this->hidden_size_ = hidden_size;
+    this->use_hidden_start_ = true;
+  }
+  virtual ~LSTMLayer() {}
+
+  virtual void ResetParameters() {
+    RNNLayer<Real>::ResetParameters();
+
+    Wxi_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
+    Whi_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
+    Wxf_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
+    Whf_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
+    Wxo_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
+    Who_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
+    bi_ = Vector<Real>::Zero(this->hidden_size_);
+    bf_ = Vector<Real>::Zero(this->hidden_size_);
+    bo_ = Vector<Real>::Zero(this->hidden_size_);
+    if (this->use_hidden_start_) {
+      c0_ = Vector<Real>::Zero(this->hidden_size_);
+    } 
+  }
+
+  virtual void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
+				    std::vector<Vector<Real>*> *biases,
+				    std::vector<std::string> *weight_names,
+				    std::vector<std::string> *bias_names) {
+    RNNLayer<Real>::CollectAllParameters(weights, biases, weight_names,
+                                         bias_names);
+
+    weights->push_back(&Wxi_);
+    weights->push_back(&Whi_);
+    weights->push_back(&Wxf_);
+    weights->push_back(&Whf_);
+    weights->push_back(&Wxo_);
+    weights->push_back(&Who_);
+
+    biases->push_back(&bi_);
+    biases->push_back(&bf_);
+    biases->push_back(&bo_);
+    if (this->use_hidden_start_) {
+      biases->push_back(&c0_); // Not really a bias, but it goes here.
+    }
+
+    weight_names->push_back("Wxi");
+    weight_names->push_back("Whi");
+    weight_names->push_back("Wxf");
+    weight_names->push_back("Whf");
+    weight_names->push_back("Wxo");
+    weight_names->push_back("Who");
+
+    bias_names->push_back("bi");
+    bias_names->push_back("bf");
+    bias_names->push_back("bo");
+    if (this->use_hidden_start_) {
+      bias_names->push_back("c0");
+    }
+  }
+
+  virtual void CollectAllParameterDerivatives(
+      std::vector<Matrix<Real>*> *weight_derivatives,
+      std::vector<Vector<Real>*> *bias_derivatives) {
+    RNNLayer<Real>::CollectAllParameterDerivatives(weight_derivatives,
+                                                   bias_derivatives);
+    weight_derivatives->push_back(&dWxi_);
+    weight_derivatives->push_back(&dWhi_);
+    weight_derivatives->push_back(&dWxf_);
+    weight_derivatives->push_back(&dWhf_);
+    weight_derivatives->push_back(&dWxo_);
+    weight_derivatives->push_back(&dWho_);
+    bias_derivatives->push_back(&dbi_);
+    bias_derivatives->push_back(&dbf_);
+    bias_derivatives->push_back(&dbo_);
+    if (this->use_hidden_start_) {
+      bias_derivatives->push_back(&dc0_); // Not really a bias, but it goes here.
+    }
+  }
+
+  virtual double GetUniformInitializationLimit(Matrix<Real> *W) {
+    int num_outputs = W->rows();
+    int num_inputs = W->cols();
+    double coeff;
+    // Weights controlling gates have logistic activations.
+    if (this->activation_function_ == ActivationFunctions::LOGISTIC ||
+        W == &Wxi_ || W == &Whi_ || W == &Wxf_ || W == &Whf_ ||
+	W == &Wxo_ || W == &Who_) {
+      coeff = 4.0;
+    } else {
+      coeff = 1.0;
+    }
+    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
+  }
+
+  virtual void ResetGradients() {
+    RNNLayer<Real>::ResetGradients();
+    dWxi_.setZero(this->hidden_size_, this->input_size_);
+    dWhi_.setZero(this->hidden_size_, this->hidden_size_);
+    dWxf_.setZero(this->hidden_size_, this->input_size_);
+    dWhf_.setZero(this->hidden_size_, this->hidden_size_);
+    dWxo_.setZero(this->hidden_size_, this->input_size_);
+    dWho_.setZero(this->hidden_size_, this->hidden_size_);
+    dbi_.setZero(this->hidden_size_);
+    dbf_.setZero(this->hidden_size_);
+    dbo_.setZero(this->hidden_size_);
+    if (this->use_hidden_start_) {
+      dc0_.setZero(this->hidden_size_);
+    }
+  }
+
+  virtual void RunForward() {
+    const Matrix<Real> &x = this->GetInput();
+
+    int length = x.cols();
+    i_.setZero(this->hidden_size_, length);
+    f_.setZero(this->hidden_size_, length);
+    o_.setZero(this->hidden_size_, length);
+    cu_.setZero(this->hidden_size_, length);
+    c_.setZero(this->hidden_size_, length);
+    hu_.setZero(this->hidden_size_, length);
+    this->output_.setZero(this->hidden_size_, length);
+    Matrix<Real> iraw = (Wxi_ * x).colwise() + bi_;
+    Matrix<Real> fraw = (Wxf_ * x).colwise() + bf_;
+    Matrix<Real> oraw = (Wxo_ * x).colwise() + bo_;
+    Matrix<Real> curaw = (this->Wxh_ * x).colwise() + this->bh_;
+    Vector<Real> hprev = Vector<Real>::Zero(this->output_.rows());
+    Vector<Real> cprev = Vector<Real>::Zero(this->output_.rows());
+    if (this->use_hidden_start_) {
+      hprev = this->h0_;
+      cprev = this->c0_;
+    }
+    Vector<Real> result;
+    Vector<Real> tmp;
+    for (int t = 0; t < length; ++t) {
+      tmp = iraw.col(t) + Whi_ * hprev;
+      EvaluateActivation(ActivationFunctions::LOGISTIC,
+                         tmp,
+                         &result);
+      i_.col(t) = result;
+
+      tmp = fraw.col(t) + Whf_ * hprev;
+      EvaluateActivation(ActivationFunctions::LOGISTIC,
+                         tmp,
+                         &result);
+      f_.col(t) = result;
+
+      tmp = oraw.col(t) + Who_ * hprev;
+      EvaluateActivation(ActivationFunctions::LOGISTIC,
+                         tmp,
+                         &result);
+      o_.col(t) = result;
+
+      tmp = curaw.col(t) + this->Whh_ * hprev;
+      EvaluateActivation(this->activation_function_,
+                         tmp,
+                         &result);
+      cu_.col(t) = result;
+
+      c_.col(t) = f_.col(t).cwiseProduct(cprev) + i_.col(t).cwiseProduct(cu_.col(t));
+
+      tmp = c_.col(t);
+      EvaluateActivation(this->activation_function_,
+                         tmp,
+                         &result);
+      hu_.col(t) = result;
+
+      this->output_.col(t) = o_.col(t).cwiseProduct(hu_.col(t));
+
+      hprev = this->output_.col(t);
+      cprev = c_.col(t);
+    }
+  }
+
+  virtual void RunBackward() {
+    const Matrix<Real> &x = this->GetInput();
+    Matrix<Real> *dx = this->GetInputDerivative();
+
+    Vector<Real> dhnext = Vector<Real>::Zero(this->Whh_.rows());
+    Vector<Real> dcnext = Vector<Real>::Zero(this->hidden_size_);
+    //Vector<Real> fnext = Vector<Real>::Zero(this->hidden_size_);
+    const Matrix<Real> &dy = this->output_derivative_;
+
+    Matrix<Real> dcuraw;
+    DerivateActivation(this->activation_function_, cu_, &dcuraw);
+    Matrix<Real> dhuraw;
+    DerivateActivation(this->activation_function_, hu_, &dhuraw);
+    Matrix<Real> diraw;
+    DerivateActivation(ActivationFunctions::LOGISTIC, i_, &diraw);
+    Matrix<Real> dfraw;
+    DerivateActivation(ActivationFunctions::LOGISTIC, f_, &dfraw);
+    Matrix<Real> doraw;
+    DerivateActivation(ActivationFunctions::LOGISTIC, o_, &doraw);
+
+    int length = dy.cols();
+    for (int t = length - 1; t >= 0; --t) {
+      Vector<Real> dh = dy.col(t) + dhnext; // Backprop into h.
+      Vector<Real> dhu = o_.col(t).cwiseProduct(dh);
+      Vector<Real> dout = hu_.col(t).cwiseProduct(dh);
+
+      Vector<Real> dc = dhuraw.col(t).cwiseProduct(dhu) + dcnext; //dcnext.cwiseProduct(fnext);
+
+      Vector<Real> cprev;
+      if (t == 0) {
+        if (this->use_hidden_start_) {
+          cprev = c0_;
+        } else {
+          cprev = Vector<Real>::Zero(c_.rows());
+        }
+      } else {
+        cprev = this->c_.col(t-1);
+      }
+
+      Vector<Real> di = cu_.col(t).cwiseProduct(dc);
+      Vector<Real> df = cprev.cwiseProduct(dc);
+      Vector<Real> dcu = i_.col(t).cwiseProduct(dc);
+
+      diraw.col(t) = diraw.col(t).cwiseProduct(di);
+      dfraw.col(t) = dfraw.col(t).cwiseProduct(df);
+      doraw.col(t) = doraw.col(t).cwiseProduct(dout);
+      dcuraw.col(t) = dcuraw.col(t).cwiseProduct(dcu);
+
+      dhnext.noalias() =
+        Who_.transpose() * doraw.col(t) +
+        Whf_.transpose() * dfraw.col(t) +
+        Whi_.transpose() * diraw.col(t) +
+        this->Whh_.transpose() * dcuraw.col(t);
+
+      dcnext.noalias() = dc.cwiseProduct(f_.col(t));
+      //fnext.noalias() = f_.col(t);
+    }
+
+    *dx += Wxo_.transpose() * doraw + Wxf_.transpose() * dfraw +
+      Wxi_.transpose() * diraw + this->Wxh_.transpose() * dcuraw; // Backprop into x.
+
+    dWxi_.noalias() += diraw * x.transpose();
+    dbi_.noalias() += diraw.rowwise().sum();
+    dWxf_.noalias() += dfraw * x.transpose();
+    dbf_.noalias() += dfraw.rowwise().sum();
+    dWxo_.noalias() += doraw * x.transpose();
+    dbo_.noalias() += doraw.rowwise().sum();
+    this->dWxh_.noalias() += dcuraw * x.transpose();
+    this->dbh_.noalias() += dcuraw.rowwise().sum();
+
+    dWhi_.noalias() += diraw.rightCols(length-1) *
+      this->output_.leftCols(length-1).transpose();
+    dWhf_.noalias() += dfraw.rightCols(length-1) *
+      this->output_.leftCols(length-1).transpose();
+    dWho_.noalias() += doraw.rightCols(length-1) *
+      this->output_.leftCols(length-1).transpose();
+    this->dWhh_.noalias() += dcuraw.rightCols(length-1) *
+      this->output_.leftCols(length-1).transpose();
+
+    if (this->use_hidden_start_) {
+      this->dh0_.noalias() += dhnext;
+      this->dc0_.noalias() += dcnext; //.cwiseProduct(fnext);
+    }
+  }
+
+ protected:
+  Matrix<Real> Wxi_;
+  Matrix<Real> Whi_;
+  Matrix<Real> Wxf_;
+  Matrix<Real> Whf_;
+  Matrix<Real> Wxo_;
+  Matrix<Real> Who_;
+  Vector<Real> bi_;
+  Vector<Real> bf_;
+  Vector<Real> bo_;
+  Vector<Real> c0_;
+
+  Matrix<Real> dWxi_;
+  Matrix<Real> dWhi_;
+  Matrix<Real> dWxf_;
+  Matrix<Real> dWhf_;
+  Matrix<Real> dWxo_;
+  Matrix<Real> dWho_;
+  Vector<Real> dbi_;
+  Vector<Real> dbf_;
+  Vector<Real> dbo_;
+  Vector<Real> dc0_;
+
+  Matrix<Real> i_;
+  Matrix<Real> f_;
+  Matrix<Real> o_;
+  Matrix<Real> c_;
+  Matrix<Real> cu_;
+  Matrix<Real> hu_;
+};
+
 template<typename Real> class BiGRULayer : public GRULayer<Real> {
  public:
   BiGRULayer() {}

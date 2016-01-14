@@ -50,6 +50,7 @@ void ReadDataset(const std::string &dataset_file,
                  Dictionary *dictionary,
                  std::vector<std::vector<Input> > *input_sequences,
                  std::vector<int> *output_labels) {
+  bool finish_with_separator = true; // false;
   // Read data.
   std::ifstream is;
   is.open(dataset_file.c_str(), std::ifstream::in);
@@ -77,6 +78,9 @@ void ReadDataset(const std::string &dataset_file,
       words.push_back("__START__");
       words.insert(words.end(), hypothesis_words.begin(),
                    hypothesis_words.end());
+      if (finish_with_separator) {
+	words.push_back("__START__");
+      }
       Sentence *sentence = new Sentence;
       sentence->Initialize(words, label);
       dataset.push_back(sentence);
