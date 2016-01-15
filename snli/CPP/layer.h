@@ -214,10 +214,12 @@ template<typename Real> class Layer {
     RunForward();
     RunBackward();
 
-    std::cout << name_ << " " << output_.size() << " "
-              << output_derivative_.size()
-              << std::endl;
-    assert(output_.size() == output_derivative_.size());
+    std::cout << name_;
+    for (int k = 0; k < GetNumOutputs(); ++k) {
+      std::cout << " " << GetMutableOutputDerivative(k)->size();
+      assert(GetOutput(k).size() == GetMutableOutputDerivative(k)->size());
+    }
+    std::cout << std::endl;
 
     //float delta = 1e-3; //1e-5; //1e-5;
     for (int check = 0; check < num_checks; ++check) {
@@ -230,11 +232,17 @@ template<typename Real> class Layer {
         double value = (*b)[r];
         (*b)[r] = value + delta;
         RunForward();
-        double out0 = (output_.array() * output_derivative_.array()).sum();
-        (*b)[r] = value - delta;
+        double out0 = 0.0;
+	for (int k = 0; k < GetNumOutputs(); ++k) {
+	  out0 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
+	}
+        (*b)(r) = value - delta;
         RunForward();
-        double out1 = (output_.array() * output_derivative_.array()).sum();
-        (*b)[r] = value; // Put the value back.
+        double out1 = 0.0;
+	for (int k = 0; k < GetNumOutputs(); ++k) {
+	  out1 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
+	}
+        (*b)(r) = value; // Put the value back.
         RunForward();
         double numeric_gradient = (out0 - out1) / (2 * delta);
         double analytic_gradient = (*db)[r];
@@ -255,13 +263,18 @@ template<typename Real> class Layer {
         int r = static_cast<int>(W->size() *
                                  static_cast<double>(rand()) / RAND_MAX);
         double value = (*W)(r);
-        assert(output_.size() == output_derivative_.size());
         (*W)(r) = value + delta;
         RunForward();
-        double out0 = (output_.array() * output_derivative_.array()).sum();
+        double out0 = 0.0;
+	for (int k = 0; k < GetNumOutputs(); ++k) {
+	  out0 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
+	}
         (*W)(r) = value - delta;
         RunForward();
-        double out1 = (output_.array() * output_derivative_.array()).sum();
+        double out1 = 0.0;
+	for (int k = 0; k < GetNumOutputs(); ++k) {
+	  out1 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
+	}
         (*W)(r) = value; // Put the value back.
         RunForward();
         double numeric_gradient = (out0 - out1) / (2 * delta);
@@ -292,13 +305,24 @@ template<typename Real> class Layer {
     input_derivatives_.resize(n);
   }
   void SetInput(int i, const Matrix<Real> &input) { inputs_[i] = &input; }
-  const Matrix<Real> &GetOutput() const { return output_; }
   void SetInputDerivative(int i, Matrix<Real> *input_derivative) {
     input_derivatives_[i] = input_derivative;
   }
-  Matrix<Real> *GetOutputDerivative() { return &output_derivative_; }
+
+  int GetNumOutputs() const { return outputs_.size(); }
+  void SetNumOutputs(int n) {
+    outputs_.resize(n);
+    output_derivatives_.resize(n);
+  }
+  const Matrix<Real> &GetOutput(int i) const { return outputs_[i]; }
+  Matrix<Real> *GetMutableOutputDerivative(int i) { return &(output_derivatives_[i]); }
 
  protected:
+  void SetOutput(int k, const Matrix<Real> &output) {
+    outputs_[k] = output;
+  }
+
+  // Methods that assume single input/output.
   const Matrix<Real> &GetInput() {
     assert(GetNumInputs() == 1);
     return *inputs_[0];
@@ -307,13 +331,26 @@ template<typename Real> class Layer {
     assert(GetNumInputs() == 1);
     return input_derivatives_[0];
   }
+  Matrix<Real> *GetMutableOutput() {
+    //std::cout << name_ << std::endl;
+    assert(GetNumOutputs() == 1);
+    return &(outputs_[0]);
+  }
+  void SetOutput(const Matrix<Real> &output) {
+    assert(GetNumOutputs() == 1);
+    outputs_[0] = output;
+  }
+  const Matrix<Real> &GetOutputDerivative() {
+    assert(GetNumOutputs() == 1);
+    return output_derivatives_[0];
+  }
 
  protected:
   std::string name_;
   std::vector<const Matrix<Real>*> inputs_;
-  Matrix<Real> output_;
+  std::vector<Matrix<Real> > outputs_;
   std::vector<Matrix<Real>*> input_derivatives_;
-  Matrix<Real> output_derivative_;
+  std::vector<Matrix<Real> > output_derivatives_;
 
   // ADAM parameters.
   double beta1_;
@@ -347,14 +384,14 @@ template<typename Real> class AverageLayer : public Layer<Real> {
   void ResetGradients() {}
   void RunForward() {
     const Matrix<Real> &x = this->GetInput();
-    this->output_ = x.rowwise().sum() / static_cast<double>(x.cols());
+    this->SetOutput(x.rowwise().sum() / static_cast<double>(x.cols()));
   }
 
   void RunBackward() {
     //std::cout << "tmp1" << std::endl;
     Matrix<Real> *dx = this->GetInputDerivative();
-    assert(this->output_derivative_.cols() == 1);
-    dx->colwise() += this->output_derivative_.col(0) /
+    assert(this->GetOutputDerivative().cols() == 1);
+    dx->colwise() += this->GetOutputDerivative().col(0) /
       static_cast<double>(dx->cols());
     //std::cout << "tmp2" << std::endl;
   }
@@ -381,18 +418,14 @@ template<typename Real> class SelectorLayer : public Layer<Real> {
   void ResetGradients() {}
   void RunForward() {
     const Matrix<Real> &x = this->GetInput();
-    this->output_ = x.block(first_row_, first_column_, num_rows_, num_columns_);
+    this->SetOutput(x.block(first_row_, first_column_, num_rows_, num_columns_));
   }
 
   void RunBackward() {
     Matrix<Real> *dx = this->GetInputDerivative();
     (*dx).block(first_row_, first_column_, num_rows_, num_columns_) +=
-      this->output_derivative_;
+      this->GetOutputDerivative();
   }
-
-#if 0
-  void UpdateParameters(double learning_rate) {}
-#endif
 
   void DefineBlock(int first_row, int first_column,
                    int num_rows, int num_columns) {
@@ -435,30 +468,26 @@ template<typename Real> class ConcatenatorLayer : public Layer<Real> {
       assert(this->inputs_[i]->cols() == num_columns);
       num_rows += this->inputs_[i]->rows();
     }
-    this->output_.setZero(num_rows, num_columns);
+    this->GetMutableOutput()->setZero(num_rows, num_columns);
     int start = 0;
     for (int i = 0; i < this->GetNumInputs(); ++i) {
-      this->output_.block(start, 0, this->inputs_[i]->rows(), num_columns) =
+      this->GetMutableOutput()->block(start, 0, this->inputs_[i]->rows(), num_columns) =
         *(this->inputs_[i]);
       start += this->inputs_[i]->rows();
     }
   }
 
   void RunBackward() {
-    int num_columns = this->output_derivative_.cols();
+    int num_columns = this->GetOutputDerivative().cols();
     int start = 0;
     for (int i = 0; i < this->GetNumInputs(); ++i) {
       *(this->input_derivatives_[i]) +=
-        this->output_derivative_.block(start, 0,
-                                       this->input_derivatives_[i]->rows(),
-                                       num_columns);
+        this->GetOutputDerivative().block(start, 0,
+					  this->input_derivatives_[i]->rows(),
+					  num_columns);
       start += this->inputs_[i]->rows();
     }
   }
-
-#if 0
-  void UpdateParameters(double learning_rate) {}
-#endif
 };
 
 template<typename Real> class LookupLayer : public Layer<Real> {
@@ -512,13 +541,13 @@ template<typename Real> class LookupLayer : public Layer<Real> {
   }
 
   void RunForward() {
-    this->output_.setZero(embedding_dimension_, input_sequence_->size());
-    assert(this->output_.rows() == embedding_dimension_ &&
-           this->output_.cols() == input_sequence_->size());
+    this->GetMutableOutput()->setZero(embedding_dimension_, input_sequence_->size());
+    assert(this->GetMutableOutput()->rows() == embedding_dimension_ &&
+           this->GetMutableOutput()->cols() == input_sequence_->size());
     for (int t = 0; t < input_sequence_->size(); ++t) {
       int wid = (*input_sequence_)[t].wid();
       assert(wid >= 0 && wid < E_.cols());
-      this->output_.col(t) = E_.col(wid);
+      this->GetMutableOutput()->col(t) = E_.col(wid);
     }
   }
 
@@ -531,7 +560,7 @@ template<typename Real> class LookupLayer : public Layer<Real> {
     for (int t = 0; t < input_sequence_->size(); ++t) {
       int wid = (*input_sequence_)[t].wid();
       if (!updatable_[wid]) continue;
-      E_.col(wid) -= learning_rate * this->output_derivative_.col(t);
+      E_.col(wid) -= learning_rate * this->GetOutputDerivative().col(t);
     }
   }
 
@@ -598,23 +627,16 @@ template<typename Real> class LinearLayer : public Layer<Real> {
 
   void RunForward() {
     const Matrix<Real> &x = this->GetInput();
-    this->output_ = (Wxy_ * x).colwise() + by_;
+    this->SetOutput((Wxy_ * x).colwise() + by_);
   }
 
   void RunBackward() {
     const Matrix<Real> &x = this->GetInput();
     Matrix<Real> *dx = this->GetInputDerivative();
-    (*dx).noalias() += Wxy_.transpose() * this->output_derivative_;
-    dWxy_.noalias() += this->output_derivative_ * x.transpose();
-    dby_.noalias() += this->output_derivative_.rowwise().sum();
+    (*dx).noalias() += Wxy_.transpose() * this->GetOutputDerivative();
+    dWxy_.noalias() += this->GetOutputDerivative() * x.transpose();
+    dby_.noalias() += this->GetOutputDerivative().rowwise().sum();
   }
-
-#if 0
-  void UpdateParameters(double learning_rate) {
-    Wxy_ -= learning_rate * dWxy_;
-    by_ -= learning_rate * dby_;
-  }
-#endif
 
  protected:
   int input_size_;
@@ -680,7 +702,7 @@ template<typename Real> class SoftmaxOutputLayer : public Layer<Real> {
     assert(h.cols() == 1);
     Vector<Real> y = Why_ * h + by_;
     Real logsum = LogSumExp(y);
-    this->output_ = (y.array() - logsum).exp(); // This is the probability vector.
+    this->SetOutput((y.array() - logsum).exp()); // This is the probability vector.
   }
 
   void RunBackward() {
@@ -689,19 +711,12 @@ template<typename Real> class SoftmaxOutputLayer : public Layer<Real> {
     Matrix<Real> *dh = this->GetInputDerivative();
     assert(dh->cols() == 1);
 
-    Vector<Real> dy = this->output_;
+    Vector<Real> dy = *(this->GetMutableOutput());
     dy[output_label_] -= 1.0; // Backprop into y (softmax grad).
     dWhy_.noalias() += dy * h.transpose();
     dby_.noalias() += dy;
     (*dh).noalias() += Why_.transpose() * dy; // Backprop into h.
   }
-
-#if 0
-  void UpdateParameters(double learning_rate) {
-    Why_ -= learning_rate * dWhy_;
-    by_ -= learning_rate * dby_;
-  }
-#endif
 
   int output_label() { return output_label_; }
   void set_output_label(int output_label) {
@@ -784,27 +799,19 @@ template<typename Real> class FeedforwardLayer : public Layer<Real> {
     Matrix<Real> tmp = (Wxh_ * x).colwise() + bh_;
     EvaluateActivation(activation_function_,
                        tmp,
-                       &(this->output_));
+                       this->GetMutableOutput());
   }
 
   void RunBackward() {
     const Matrix<Real> &x = this->GetInput();
     Matrix<Real> *dx = this->GetInputDerivative();
     Matrix<Real> dhraw;
-    DerivateActivation(activation_function_, this->output_, &dhraw);
-    dhraw = dhraw.array() * this->output_derivative_.array();
+    DerivateActivation(activation_function_, *(this->GetMutableOutput()), &dhraw);
+    dhraw = dhraw.array() * this->GetOutputDerivative().array();
     dWxh_.noalias() += dhraw * x.transpose();
-    //std::cout << dbh_.size() << " " << dhraw.size() << std::endl;
     dbh_.noalias() += dhraw.rowwise().sum();
     *dx += Wxh_.transpose() * dhraw; // Backprop into x.
   }
-
-#if 0
-  void UpdateParameters(double learning_rate) {
-    Wxh_ -= learning_rate * dWxh_;
-    bh_ -= learning_rate * dbh_;
-  }
-#endif
 
  protected:
   int activation_function_;
@@ -828,17 +835,20 @@ template<typename Real> class RNNLayer : public Layer<Real> {
     input_size_ = input_size;
     hidden_size_ = hidden_size;
     use_hidden_start_ = true;
+    use_control_ = false;
   }
   virtual ~RNNLayer() {}
 
   int input_size() const { return input_size_; }
   int hidden_size() const { return hidden_size_; }
 
+  void set_use_control(bool use_control) { use_control_ = use_control; }
+
   virtual void ResetParameters() {
     Wxh_ = Matrix<Real>::Zero(hidden_size_, input_size_);
     Whh_ = Matrix<Real>::Zero(hidden_size_, hidden_size_);
     bh_ = Vector<Real>::Zero(hidden_size_);
-    if (use_hidden_start_) {
+    if (use_hidden_start_ && !use_control_) {
       h0_ = Vector<Real>::Zero(hidden_size_);
     }
   }
@@ -851,7 +861,7 @@ template<typename Real> class RNNLayer : public Layer<Real> {
     weights->push_back(&Whh_);
 
     biases->push_back(&bh_);
-    if (use_hidden_start_) {
+    if (use_hidden_start_ && !use_control_) {
       biases->push_back(&h0_); // Not really a bias, but it goes here.
     }
 
@@ -859,7 +869,7 @@ template<typename Real> class RNNLayer : public Layer<Real> {
     weight_names->push_back("Whh");
 
     bias_names->push_back("bh");
-    if (use_hidden_start_) {
+    if (use_hidden_start_ && !use_control_) {
       bias_names->push_back("h0");
     }
   }
@@ -870,7 +880,7 @@ template<typename Real> class RNNLayer : public Layer<Real> {
     weight_derivatives->push_back(&dWxh_);
     weight_derivatives->push_back(&dWhh_);
     bias_derivatives->push_back(&dbh_);
-    if (use_hidden_start_) {
+    if (use_hidden_start_ && !use_control_) {
       bias_derivatives->push_back(&dh0_); // Not really a bias, but goes here.
     }
   }
@@ -891,38 +901,44 @@ template<typename Real> class RNNLayer : public Layer<Real> {
     dWxh_.setZero(hidden_size_, input_size_);
     dbh_.setZero(hidden_size_);
     dWhh_.setZero(hidden_size_, hidden_size_);
-    if (use_hidden_start_) {
+    if (use_hidden_start_ && !use_control_) {
       dh0_.setZero(hidden_size_);
     }
   }
 
   virtual void RunForward() {
-    const Matrix<Real> &x = this->GetInput();
+    const Matrix<Real> &x = *(this->inputs_[0]);
     int length = x.cols();
-    this->output_.setZero(hidden_size_, length);
+    this->GetMutableOutput()->setZero(hidden_size_, length);
     Matrix<Real> hraw = (Wxh_ * x).colwise() + bh_;
-    Vector<Real> hprev = Vector<Real>::Zero(this->output_.rows());
-    if (use_hidden_start_) hprev = h0_;
+    Vector<Real> hprev = Vector<Real>::Zero(this->GetMutableOutput()->rows());
+    if (use_hidden_start_) {
+      if (!use_control_) {
+	hprev = h0_;
+      } else {
+	hprev = *(this->inputs_[1]);
+      }
+    }
     Vector<Real> result;
     for (int t = 0; t < length; ++t) {
       Vector<Real> tmp = hraw.col(t) + Whh_ * hprev;
       EvaluateActivation(activation_function_,
                          tmp,
                          &result);
-      this->output_.col(t) = result;
-      hprev = this->output_.col(t);
+      this->GetMutableOutput()->col(t) = result;
+      hprev = this->GetMutableOutput()->col(t);
     }
   }
 
   virtual void RunBackward() {
-    const Matrix<Real> &x = this->GetInput();
-    Matrix<Real> *dx = this->GetInputDerivative();
+    const Matrix<Real> &x = *(this->inputs_[0]);
+    Matrix<Real> *dx = this->input_derivatives_[0];
 
     Vector<Real> dhnext = Vector<Real>::Zero(Whh_.rows());
-    const Matrix<Real> &dy = this->output_derivative_;
+    const Matrix<Real> &dy = this->GetOutputDerivative();
 
     Matrix<Real> dhraw;
-    DerivateActivation(activation_function_, this->output_, &dhraw);
+    DerivateActivation(activation_function_, *(this->GetMutableOutput()), &dhraw);
 
     int length = dy.cols();
     for (int t = length - 1; t >= 0; --t) {
@@ -936,26 +952,22 @@ template<typename Real> class RNNLayer : public Layer<Real> {
     dWxh_.noalias() += dhraw * x.transpose();
     dbh_.noalias() += dhraw.rowwise().sum();
     dWhh_.noalias() += dhraw.rightCols(length-1) *
-      this->output_.leftCols(length-1).transpose();
-    dh0_.noalias() += dhnext;
-  }
-
-#if 0
-  virtual void UpdateParameters(double learning_rate) {
-    Wxh_ -= learning_rate * dWxh_;
-    bh_ -= learning_rate * dbh_;
-    Whh_ -= learning_rate * dWhh_;
+      this->GetMutableOutput()->leftCols(length-1).transpose();
     if (use_hidden_start_) {
-      h0_ -= learning_rate * dh0_;
+      if (!use_control_) {
+	dh0_.noalias() += dhnext;
+      } else {
+	*(this->input_derivatives_[1]) += dhnext;
+      }
     }
   }
-#endif
 
  protected:
   int activation_function_;
   int hidden_size_;
   int input_size_;
   bool use_hidden_start_;
+  bool use_control_;
 
   Matrix<Real> Wxh_;
   Matrix<Real> Whh_;
@@ -978,6 +990,7 @@ template<typename Real> class BiRNNLayer : public RNNLayer<Real> {
     this->input_size_ = input_size;
     this->hidden_size_ = hidden_size;
     this->use_hidden_start_ = true;
+    this->use_control_ = false; // TODO: handle control state.
   }
   virtual ~BiRNNLayer() {}
 
@@ -1042,7 +1055,7 @@ template<typename Real> class BiRNNLayer : public RNNLayer<Real> {
   void RunForward() {
     const Matrix<Real> &x = this->GetInput();
     int length = x.cols();
-    this->output_.setZero(2*this->hidden_size_, length);
+    this->GetMutableOutput()->setZero(2*this->hidden_size_, length);
     Matrix<Real> hraw = (this->Wxh_ * x).colwise() + this->bh_;
     Matrix<Real> lraw = (Wxl_ * x).colwise() + bl_;
     Vector<Real> hprev = Vector<Real>::Zero(this->hidden_size_);
@@ -1057,7 +1070,7 @@ template<typename Real> class BiRNNLayer : public RNNLayer<Real> {
       EvaluateActivation(this->activation_function_,
                          tmp,
                          &result);
-      this->output_.block(0, t, this->hidden_size_, 1) = result;
+      this->GetMutableOutput()->block(0, t, this->hidden_size_, 1) = result;
       hprev = result;
     }
     for (int t = length-1; t >= 0; --t) {
@@ -1065,7 +1078,7 @@ template<typename Real> class BiRNNLayer : public RNNLayer<Real> {
       EvaluateActivation(this->activation_function_,
                          tmp,
                          &result);
-      this->output_.block(this->hidden_size_, t, this->hidden_size_, 1) = result;
+      this->GetMutableOutput()->block(this->hidden_size_, t, this->hidden_size_, 1) = result;
       lnext = result;
     }
   }
@@ -1077,20 +1090,20 @@ template<typename Real> class BiRNNLayer : public RNNLayer<Real> {
     Vector<Real> dhnext = Vector<Real>::Zero(this->Whh_.rows());
     Vector<Real> dlprev = Vector<Real>::Zero(Wll_.rows());
 
-    int length = this->output_.cols();
+    int length = this->GetMutableOutput()->cols();
     Matrix<Real> result;
     DerivateActivation(this->activation_function_, this->output_, &result);
     Matrix<Real> dhraw = result.block(0, 0, this->hidden_size_, length);
     Matrix<Real> dlraw = result.block(this->hidden_size_, 0, this->hidden_size_, length);
 
     for (int t = length - 1; t >= 0; --t) {
-      Vector<Real> dh = this->output_derivative_.block(0, t, this->hidden_size_, 1) + dhnext; // Backprop into h.
+      Vector<Real> dh = this->GetOutputDerivative().block(0, t, this->hidden_size_, 1) + dhnext; // Backprop into h.
       dhraw.col(t) = dhraw.col(t).array() * dh.array();
       dhnext.noalias() = this->Whh_.transpose() * dhraw.col(t);
     }
 
     for (int t = 0; t < length; ++t) {
-      Vector<Real> dl = this->output_derivative_.block(this->hidden_size_, t, this->hidden_size_, 1) + dlprev; // Backprop into h.
+      Vector<Real> dl = this->GetOutputDerivative().block(this->hidden_size_, t, this->hidden_size_, 1) + dlprev; // Backprop into h.
       dlraw.col(t) = dlraw.col(t).array() * dl.array();
       dlprev.noalias() = Wll_.transpose() * dlraw.col(t);
     }
@@ -1101,13 +1114,13 @@ template<typename Real> class BiRNNLayer : public RNNLayer<Real> {
     this->dWxh_.noalias() += dhraw * x.transpose();
     this->dbh_.noalias() += dhraw.rowwise().sum();
     this->dWhh_.noalias() += dhraw.rightCols(length-1) *
-      this->output_.block(0, 0, this->hidden_size_, length-1).transpose();
+      this->GetMutableOutput()->block(0, 0, this->hidden_size_, length-1).transpose();
     this->dh0_.noalias() += dhnext;
 
     dWxl_.noalias() += dlraw * x.transpose();
     dbl_.noalias() += dlraw.rowwise().sum();
     dWll_.noalias() += dlraw.leftCols(length-1) *
-      this->output_.block(this->hidden_size_, 1, this->hidden_size_, length-1).transpose();
+      this->GetMutableOutput()->block(this->hidden_size_, 1, this->hidden_size_, length-1).transpose();
     dl0_.noalias() += dlprev;
   }
 
@@ -1133,6 +1146,7 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     this->input_size_ = input_size;
     this->hidden_size_ = hidden_size;
     this->use_hidden_start_ = true;
+    this->use_control_ = false;
   }
   virtual ~GRULayer() {}
 
@@ -1209,18 +1223,24 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
   }
 
   virtual void RunForward() {
-    const Matrix<Real> &x = this->GetInput();
+    const Matrix<Real> &x = *(this->inputs_[0]);
 
     int length = x.cols();
     z_.setZero(this->hidden_size_, length);
     r_.setZero(this->hidden_size_, length);
     hu_.setZero(this->hidden_size_, length);
-    this->output_.setZero(this->hidden_size_, length);
+    this->GetMutableOutput()->setZero(this->hidden_size_, length);
     Matrix<Real> zraw = (Wxz_ * x).colwise() + bz_;
     Matrix<Real> rraw = (Wxr_ * x).colwise() + br_;
     Matrix<Real> hraw = (this->Wxh_ * x).colwise() + this->bh_;
-    Vector<Real> hprev = Vector<Real>::Zero(this->output_.rows());
-    if (this->use_hidden_start_) hprev = this->h0_;
+    Vector<Real> hprev = Vector<Real>::Zero(this->GetMutableOutput()->rows());
+    if (this->use_hidden_start_) {
+      if (!this->use_control_) {
+	hprev = this->h0_;
+      } else {
+	hprev = *(this->inputs_[1]);
+      }
+    }
     Vector<Real> result;
     Vector<Real> tmp;
     for (int t = 0; t < length; ++t) {
@@ -1241,17 +1261,17 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
                          tmp,
                          &result);
       hu_.col(t) = result;
-      this->output_.col(t) = z_.col(t).cwiseProduct(hu_.col(t) - hprev) + hprev;
-      hprev = this->output_.col(t);
+      this->GetMutableOutput()->col(t) = z_.col(t).cwiseProduct(hu_.col(t) - hprev) + hprev;
+      hprev = this->GetMutableOutput()->col(t);
     }
   }
 
   virtual void RunBackward() {
-    const Matrix<Real> &x = this->GetInput();
-    Matrix<Real> *dx = this->GetInputDerivative();
+    const Matrix<Real> &x = *(this->inputs_[0]);
+    Matrix<Real> *dx = this->input_derivatives_[0];
 
     Vector<Real> dhnext = Vector<Real>::Zero(this->Whh_.rows());
-    const Matrix<Real> &dy = this->output_derivative_;
+    const Matrix<Real> &dy = this->GetOutputDerivative();
 
     Matrix<Real> dhuraw;
     DerivateActivation(this->activation_function_, hu_, &dhuraw);
@@ -1268,9 +1288,17 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
       dhuraw.col(t) = dhuraw.col(t).cwiseProduct(dhu);
       Vector<Real> hprev;
       if (t == 0) {
-        hprev = Vector<Real>::Zero(this->output_.rows());
+        // hprev = Vector<Real>::Zero(this->GetMutableOutput()->rows()); <- LOOKS LIKE A BUG.
+	hprev = Vector<Real>::Zero(this->GetMutableOutput()->rows());
+	if (this->use_hidden_start_) {
+	  if (!this->use_control_) {
+	    hprev = this->h0_;
+	  } else {
+	    hprev = *(this->inputs_[1]);
+	  }
+	}
       } else {
-        hprev = this->output_.col(t-1);
+        hprev = this->GetMutableOutput()->col(t-1);
       }
 
       Vector<Real> dq = this->Whh_.transpose() * dhuraw.col(t);
@@ -1298,27 +1326,21 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     this->dbh_.noalias() += dhuraw.rowwise().sum();
 
     dWhz_.noalias() += dzraw.rightCols(length-1) *
-      this->output_.leftCols(length-1).transpose();
+      this->GetMutableOutput()->leftCols(length-1).transpose();
     dWhr_.noalias() += drraw.rightCols(length-1) *
-      this->output_.leftCols(length-1).transpose();
+      this->GetMutableOutput()->leftCols(length-1).transpose();
     this->dWhh_.noalias() += dhuraw.rightCols(length-1) *
-      ((r_.rightCols(length-1)).cwiseProduct(this->output_.leftCols(length-1))).
+      ((r_.rightCols(length-1)).cwiseProduct(this->GetMutableOutput()->leftCols(length-1))).
       transpose();
 
-    this->dh0_.noalias() += dhnext;
+    if (this->use_hidden_start_) {
+      if (!this->use_control_) {
+	this->dh0_.noalias() += dhnext;
+      } else {
+	*(this->input_derivatives_[1]) += dhnext;
+      }
+    }
   }
-
-#if 0
-  void UpdateParameters(double learning_rate) {
-    RNNLayer<Real>::UpdateParameters(learning_rate);
-    Wxz_ -= learning_rate * dWxz_;
-    Whz_ -= learning_rate * dWhz_;
-    Wxr_ -= learning_rate * dWxr_;
-    Whr_ -= learning_rate * dWhr_;
-    bz_ -= learning_rate * dbz_;
-    br_ -= learning_rate * dbr_;
-  }
-#endif
 
  protected:
   Matrix<Real> Wxz_;
@@ -1466,13 +1488,13 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     cu_.setZero(this->hidden_size_, length);
     c_.setZero(this->hidden_size_, length);
     hu_.setZero(this->hidden_size_, length);
-    this->output_.setZero(this->hidden_size_, length);
+    this->GetMutableOutput()->setZero(this->hidden_size_, length);
     Matrix<Real> iraw = (Wxi_ * x).colwise() + bi_;
     Matrix<Real> fraw = (Wxf_ * x).colwise() + bf_;
     Matrix<Real> oraw = (Wxo_ * x).colwise() + bo_;
     Matrix<Real> curaw = (this->Wxh_ * x).colwise() + this->bh_;
-    Vector<Real> hprev = Vector<Real>::Zero(this->output_.rows());
-    Vector<Real> cprev = Vector<Real>::Zero(this->output_.rows());
+    Vector<Real> hprev = Vector<Real>::Zero(this->GetMutableOutput()->rows());
+    Vector<Real> cprev = Vector<Real>::Zero(this->GetMutableOutput()->rows());
     if (this->use_hidden_start_) {
       hprev = this->h0_;
       cprev = this->c0_;
@@ -1512,9 +1534,9 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
                          &result);
       hu_.col(t) = result;
 
-      this->output_.col(t) = o_.col(t).cwiseProduct(hu_.col(t));
+      this->GetMutableOutput()->col(t) = o_.col(t).cwiseProduct(hu_.col(t));
 
-      hprev = this->output_.col(t);
+      hprev = this->GetMutableOutput()->col(t);
       cprev = c_.col(t);
     }
   }
@@ -1526,7 +1548,7 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     Vector<Real> dhnext = Vector<Real>::Zero(this->Whh_.rows());
     Vector<Real> dcnext = Vector<Real>::Zero(this->hidden_size_);
     //Vector<Real> fnext = Vector<Real>::Zero(this->hidden_size_);
-    const Matrix<Real> &dy = this->output_derivative_;
+    const Matrix<Real> &dy = this->GetOutputDerivative();
 
     Matrix<Real> dcuraw;
     DerivateActivation(this->activation_function_, cu_, &dcuraw);
@@ -1590,13 +1612,13 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     this->dbh_.noalias() += dcuraw.rowwise().sum();
 
     dWhi_.noalias() += diraw.rightCols(length-1) *
-      this->output_.leftCols(length-1).transpose();
+      this->GetMutableOutput()->leftCols(length-1).transpose();
     dWhf_.noalias() += dfraw.rightCols(length-1) *
-      this->output_.leftCols(length-1).transpose();
+      this->GetMutableOutput()->leftCols(length-1).transpose();
     dWho_.noalias() += doraw.rightCols(length-1) *
-      this->output_.leftCols(length-1).transpose();
+      this->GetMutableOutput()->leftCols(length-1).transpose();
     this->dWhh_.noalias() += dcuraw.rightCols(length-1) *
-      this->output_.leftCols(length-1).transpose();
+      this->GetMutableOutput()->leftCols(length-1).transpose();
 
     if (this->use_hidden_start_) {
       this->dh0_.noalias() += dhnext;
@@ -1763,7 +1785,7 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
     r_r_.setZero(this->hidden_size_, length);
     lu_.setZero(this->hidden_size_, length);
 
-    this->output_.setZero(2*this->hidden_size_, length);
+    this->GetMutableOutput()->setZero(2*this->hidden_size_, length);
 
     Matrix<Real> zraw = (this->Wxz_ * x).colwise() + this->bz_;
     Matrix<Real> rraw = (this->Wxr_ * x).colwise() + this->br_;
@@ -1797,9 +1819,9 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
                          tmp,
                          &result);
       this->hu_.col(t) = result;
-      this->output_.block(0, t, this->hidden_size_, 1) =
+      this->GetMutableOutput()->block(0, t, this->hidden_size_, 1) =
 	this->z_.col(t).cwiseProduct(this->hu_.col(t) - hprev) + hprev;
-      hprev = this->output_.block(0, t, this->hidden_size_, 1);
+      hprev = this->GetMutableOutput()->block(0, t, this->hidden_size_, 1);
     }
     for (int t = length-1; t >= 0; --t) {
       tmp = zraw_r.col(t) + Wlz_r_ * lnext;
@@ -1819,9 +1841,9 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
                          tmp,
                          &result);
       lu_.col(t) = result;
-      this->output_.block(this->hidden_size_, t, this->hidden_size_, 1) =
+      this->GetMutableOutput()->block(this->hidden_size_, t, this->hidden_size_, 1) =
 	z_r_.col(t).cwiseProduct(lu_.col(t) - lnext) + lnext;
-      lnext = this->output_.block(this->hidden_size_, t, this->hidden_size_, 1);
+      lnext = this->GetMutableOutput()->block(this->hidden_size_, t, this->hidden_size_, 1);
     }
   }
 
@@ -1833,7 +1855,7 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
     Vector<Real> dlprev = Vector<Real>::Zero(Wll_.rows());
     //const Matrix<Real> &dy = this->output_derivative_;
 
-    int length = this->output_.cols();
+    int length = this->GetMutableOutput()->cols();
     Matrix<Real> dhuraw;
     DerivateActivation(this->activation_function_, this->hu_, &dhuraw);
     Matrix<Real> dzraw;
@@ -1848,7 +1870,7 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
     DerivateActivation(ActivationFunctions::LOGISTIC, r_r_, &drraw_r);
 
     for (int t = length - 1; t >= 0; --t) {
-      Vector<Real> dh = this->output_derivative_.block(0, t, this->hidden_size_, 1) + dhnext; // Backprop into h.
+      Vector<Real> dh = this->GetOutputDerivative().block(0, t, this->hidden_size_, 1) + dhnext; // Backprop into h.
       Vector<Real> dhu = this->z_.col(t).cwiseProduct(dh);
 
       dhuraw.col(t) = dhuraw.col(t).cwiseProduct(dhu);
@@ -1856,7 +1878,7 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
       if (t == 0) {
         hprev = Vector<Real>::Zero(this->hidden_size_);
       } else {
-        hprev = this->output_.block(0, t-1, this->hidden_size_, 1);
+        hprev = this->GetMutableOutput()->block(0, t-1, this->hidden_size_, 1);
       }
 
       Vector<Real> dq = this->Whh_.transpose() * dhuraw.col(t);
@@ -1874,7 +1896,7 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
     }
 
     for (int t = 0; t < length; ++t) {
-      Vector<Real> dl = this->output_derivative_.block(this->hidden_size_, t, this->hidden_size_, 1) + dlprev; // Backprop into h.
+      Vector<Real> dl = this->GetOutputDerivative().block(this->hidden_size_, t, this->hidden_size_, 1) + dlprev; // Backprop into h.
       Vector<Real> dlu = z_r_.col(t).cwiseProduct(dl);
 
       dluraw.col(t) = dluraw.col(t).cwiseProduct(dlu);
@@ -1882,7 +1904,7 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
       if (t == length-1) {
         lnext = Vector<Real>::Zero(this->hidden_size_);
       } else {
-        lnext = this->output_.block(this->hidden_size_, t+1, this->hidden_size_, 1);
+        lnext = this->GetMutableOutput()->block(this->hidden_size_, t+1, this->hidden_size_, 1);
       }
 
       Vector<Real> dq_r = this->Wll_.transpose() * dluraw.col(t);
@@ -1919,19 +1941,19 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
     dbl_.noalias() += dluraw.rowwise().sum();
 
     this->dWhz_.noalias() += dzraw.rightCols(length-1) *
-      this->output_.block(0, 0, this->hidden_size_, length-1).transpose();
+      this->GetMutableOutput()->block(0, 0, this->hidden_size_, length-1).transpose();
     this->dWhr_.noalias() += drraw.rightCols(length-1) *
-      this->output_.block(0, 0, this->hidden_size_, length-1).transpose();
+      this->GetMutableOutput()->block(0, 0, this->hidden_size_, length-1).transpose();
     this->dWhh_.noalias() += dhuraw.rightCols(length-1) *
-      ((this->r_.rightCols(length-1)).cwiseProduct(this->output_.block(0, 0, this->hidden_size_, length-1))).
+      ((this->r_.rightCols(length-1)).cwiseProduct(this->GetMutableOutput()->block(0, 0, this->hidden_size_, length-1))).
       transpose();
 
     dWlz_r_.noalias() += dzraw_r.leftCols(length-1) *
-      this->output_.block(this->hidden_size_, 1, this->hidden_size_, length-1).transpose();
+      this->GetMutableOutput()->block(this->hidden_size_, 1, this->hidden_size_, length-1).transpose();
     dWlr_r_.noalias() += drraw_r.leftCols(length-1) *
-      this->output_.block(this->hidden_size_, 1, this->hidden_size_, length-1).transpose();
+      this->GetMutableOutput()->block(this->hidden_size_, 1, this->hidden_size_, length-1).transpose();
     dWll_.noalias() += dluraw.leftCols(length-1) *
-      ((r_r_.leftCols(length-1)).cwiseProduct(this->output_.block(this->hidden_size_, 1, this->hidden_size_, length-1))).
+      ((r_r_.leftCols(length-1)).cwiseProduct(this->GetMutableOutput()->block(this->hidden_size_, 1, this->hidden_size_, length-1))).
       transpose();
 
     this->dh0_.noalias() += dhnext;
@@ -2084,7 +2106,7 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     std::cout << "p_att=" << p_ << std::endl;
 #endif
 
-    this->output_.noalias() = X * p_;
+    this->SetOutput(X * p_);
   }
 
   void RunBackward() {
@@ -2094,10 +2116,10 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     Matrix<Real> *dX = this->input_derivatives_[0];
     Matrix<Real> *dy = this->input_derivatives_[1];
     assert(y.cols() == 1);
-    assert(this->output_derivative_.cols() == 1);
+    assert(this->GetOutputDerivative().cols() == 1);
 
     int length = X.cols();
-    dp_.noalias() = X.transpose() * this->output_derivative_;
+    dp_.noalias() = X.transpose() * this->GetOutputDerivative();
 
     Vector<Real> Jdp;
     if (use_sparsemax_) {
@@ -2149,7 +2171,7 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     Vector<Real> dzraw_sum = dzraw.rowwise().sum();
 
     *dX += Wxz_.transpose() * dzraw;
-    *dX += this->output_derivative_ * p_.transpose();
+    *dX += this->GetOutputDerivative() * p_.transpose();
     *dy += Wyz_.transpose() * dzraw_sum;
 
     dwzp_ += z_ * Jdp;
@@ -2161,15 +2183,6 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
   const Vector<Real> &GetAttentionProbabilities() {
     return p_;
   }
-
-#if 0
-  void UpdateParameters(double learning_rate) {
-    Wxz_ -= learning_rate * dWxz_;
-    Wyz_ -= learning_rate * dWyz_;
-    dbz_ -= learning_rate * dbz_;
-    wzp_ -= learning_rate * dwzp_;
-  }
-#endif
 
  protected:
   int activation_function_;
