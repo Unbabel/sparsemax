@@ -18,7 +18,8 @@ int main(int argc, char** argv) {
   int num_tokens = 4;
 
   DoubleMatrix x, dx;
-  DoubleMatrix *dy;
+  DoubleMatrix *dy, *dc;
+  DoubleMatrix c0, dc0;
 
   srand(1234);
 
@@ -58,16 +59,31 @@ int main(int argc, char** argv) {
   dy->setRandom(rnn_layer.hidden_size(), num_tokens);
   rnn_layer.CheckGradient(num_checks, delta);
 
+  bool use_control = true;
   lstm_layer.InitializeParameters();
   lstm_layer.ResetGradients();
   x = DoubleMatrix::Random(lstm_layer.input_size(), num_tokens);
   dx = DoubleMatrix::Zero(lstm_layer.input_size(), num_tokens);
-  lstm_layer.SetNumInputs(1);
-  lstm_layer.SetNumOutputs(1);
-  lstm_layer.SetInput(0, x);
-  lstm_layer.SetInputDerivative(0, &dx);
+  if (use_control) {
+    c0 = DoubleMatrix::Random(lstm_layer.input_size(), 1);
+    dc0 = DoubleMatrix::Zero(lstm_layer.input_size(), 1);
+    lstm_layer.set_use_control(true);
+    lstm_layer.SetNumInputs(2);
+    lstm_layer.SetNumOutputs(2);
+    lstm_layer.SetInput(0, x);
+    lstm_layer.SetInputDerivative(0, &dx);
+    lstm_layer.SetInput(1, c0);
+    lstm_layer.SetInputDerivative(1, &dc0);
+  } else {
+    lstm_layer.SetNumInputs(1);
+    lstm_layer.SetNumOutputs(2);
+    lstm_layer.SetInput(0, x);
+    lstm_layer.SetInputDerivative(0, &dx);
+  }
   dy = lstm_layer.GetMutableOutputDerivative(0);
   dy->setRandom(lstm_layer.hidden_size(), num_tokens);
+  dc = lstm_layer.GetMutableOutputDerivative(1);
+  dc->setRandom(lstm_layer.hidden_size(), num_tokens);
   lstm_layer.CheckGradient(num_checks, delta);
 
 #if 0

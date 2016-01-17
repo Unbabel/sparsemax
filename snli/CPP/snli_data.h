@@ -77,8 +77,8 @@ class Dictionary {
   }
 
   void AddWordsFromDataset(const std::vector<Sentence*> &dataset,
-			   int word_cutoff,
-			   int affix_cutoff) {
+                           int word_cutoff,
+                           int affix_cutoff) {
     // Temporary dictionaries.
     std::unordered_map<std::string, int> word_alphabet = word_alphabet_;
     std::unordered_map<std::string, int> prefix_alphabet = prefix_alphabet_;

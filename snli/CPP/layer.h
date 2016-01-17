@@ -26,6 +26,8 @@ template<typename Real> class Layer {
     }
   }
 
+  const std::string &name() { return name_; }
+
   virtual void ResetParameters() = 0;
 
   virtual void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -39,7 +41,8 @@ template<typename Real> class Layer {
 
   virtual double GetUniformInitializationLimit(Matrix<Real> *W) = 0;
 
-  virtual void UpdateParameters(double learning_rate,
+  virtual void UpdateParameters(int batch_size,
+                                double learning_rate,
                                 double regularization_constant) {
     std::vector<Matrix<Real>*> weights, weight_derivatives;
     std::vector<Vector<Real>*> biases, bias_derivatives;
@@ -51,6 +54,7 @@ template<typename Real> class Layer {
     for (int i = 0; i < biases.size(); ++i) {
       auto b = biases[i];
       auto db = bias_derivatives[i];
+      (*db) /= static_cast<double>(batch_size);
       (*db) += (regularization_constant * (*b));
       *b -= learning_rate * (*db);
     }
@@ -58,9 +62,27 @@ template<typename Real> class Layer {
     for (int i = 0; i < weights.size(); ++i) {
       auto W = weights[i];
       auto dW = weight_derivatives[i];
+      (*dW) /= static_cast<double>(batch_size);
       (*dW) += (regularization_constant * (*W));
       *W -= learning_rate * (*dW);
     }
+  }
+
+  double ComputeSquaredNormOfParameters() {
+    std::vector<Matrix<Real>*> weights, weight_derivatives;
+    std::vector<Vector<Real>*> biases, bias_derivatives;
+    std::vector<std::string> weight_names;
+    std::vector<std::string> bias_names;
+    CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
+
+    // The biases do not contribute to the squared norm.
+    double squared_norm = 0.0;
+    for (int i = 0; i < weights.size(); ++i) {
+      auto W = weights[i];
+      squared_norm += (W->array() * W->array()).sum();
+    }
+
+    return squared_norm;
   }
 
   void InitializeADAM(double beta1, double beta2, double epsilon) {
@@ -96,7 +118,8 @@ template<typename Real> class Layer {
     }
   }
 
-  void UpdateParametersADAM(double learning_rate,
+  void UpdateParametersADAM(int batch_size,
+                            double learning_rate,
                             double regularization_constant) {
     std::vector<Matrix<Real>*> weights, weight_derivatives;
     std::vector<Vector<Real>*> biases, bias_derivatives;
@@ -114,6 +137,7 @@ template<typename Real> class Layer {
       auto b = biases[i];
       auto db = bias_derivatives[i];
 
+      (*db) /= static_cast<double>(batch_size);
       (*db) += (regularization_constant * (*b));
 
       auto mb = first_bias_moments_[i];
@@ -136,6 +160,7 @@ template<typename Real> class Layer {
       auto W = weights[i];
       auto dW = weight_derivatives[i];
 
+      (*dW) /= static_cast<double>(batch_size);
       (*dW) += (regularization_constant * (*W));
 
       auto mW = first_weight_moments_[i];
@@ -221,7 +246,6 @@ template<typename Real> class Layer {
     }
     std::cout << std::endl;
 
-    //float delta = 1e-3; //1e-5; //1e-5;
     for (int check = 0; check < num_checks; ++check) {
       for (int i = 0; i < biases.size(); ++i) {
         auto name = bias_names[i];
@@ -233,15 +257,15 @@ template<typename Real> class Layer {
         (*b)[r] = value + delta;
         RunForward();
         double out0 = 0.0;
-	for (int k = 0; k < GetNumOutputs(); ++k) {
-	  out0 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
-	}
+        for (int k = 0; k < GetNumOutputs(); ++k) {
+          out0 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
+        }
         (*b)(r) = value - delta;
         RunForward();
         double out1 = 0.0;
-	for (int k = 0; k < GetNumOutputs(); ++k) {
-	  out1 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
-	}
+        for (int k = 0; k < GetNumOutputs(); ++k) {
+          out1 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
+        }
         (*b)(r) = value; // Put the value back.
         RunForward();
         double numeric_gradient = (out0 - out1) / (2 * delta);
@@ -266,15 +290,15 @@ template<typename Real> class Layer {
         (*W)(r) = value + delta;
         RunForward();
         double out0 = 0.0;
-	for (int k = 0; k < GetNumOutputs(); ++k) {
-	  out0 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
-	}
+        for (int k = 0; k < GetNumOutputs(); ++k) {
+          out0 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
+        }
         (*W)(r) = value - delta;
         RunForward();
         double out1 = 0.0;
-	for (int k = 0; k < GetNumOutputs(); ++k) {
-	  out1 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
-	}
+        for (int k = 0; k < GetNumOutputs(); ++k) {
+          out1 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
+        }
         (*W)(r) = value; // Put the value back.
         RunForward();
         double numeric_gradient = (out0 - out1) / (2 * delta);
@@ -294,7 +318,13 @@ template<typename Real> class Layer {
     std::cout << std::endl;
   }
 
-  virtual void ResetGradients() = 0;
+  virtual void ResetOutputDerivatives() {
+    for (int k = 0; k < GetNumOutputs(); ++k) {
+      output_derivatives_[k].setZero(outputs_[k].rows(), outputs_[k].cols());
+    }
+  }
+
+  virtual void ResetGradients() = 0; // TODO: make this automatic.
   virtual void RunForward() = 0;
   virtual void RunBackward() = 0;
   //virtual void UpdateParameters(double learning_rate) = 0;
@@ -483,13 +513,107 @@ template<typename Real> class ConcatenatorLayer : public Layer<Real> {
     for (int i = 0; i < this->GetNumInputs(); ++i) {
       *(this->input_derivatives_[i]) +=
         this->GetOutputDerivative().block(start, 0,
-					  this->input_derivatives_[i]->rows(),
-					  num_columns);
+                                          this->input_derivatives_[i]->rows(),
+                                          num_columns);
       start += this->inputs_[i]->rows();
     }
   }
 };
 
+template<typename Real> class LookupLayer : public Layer<Real> {
+ public:
+  LookupLayer(int num_words, int embedding_dimension) {
+    this->name_ = "Lookup";
+    num_words_ = num_words;
+    num_words_fixed_ = 0;
+    embedding_dimension_ = embedding_dimension;
+  }
+
+  virtual ~LookupLayer() {}
+
+  int embedding_dimension() { return embedding_dimension_; }
+
+  void ResetParameters() {
+    // Only consider as parameters those embeddings that are not fixed.
+    E_ = Matrix<Real>::Zero(embedding_dimension_,
+                            num_words_ - num_words_fixed_);
+  }
+
+  void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
+                            std::vector<Vector<Real>*> *biases,
+                            std::vector<std::string> *weight_names,
+                            std::vector<std::string> *bias_names) {
+    weights->push_back(&E_);
+    weight_names->push_back("embeddings");
+  }
+
+  void CollectAllParameterDerivatives(
+      std::vector<Matrix<Real>*> *weight_derivatives,
+      std::vector<Vector<Real>*> *bias_derivatives) {
+    weight_derivatives->push_back(&dE_);
+  }
+
+  double GetUniformInitializationLimit(Matrix<Real> *W) {
+    return 0.05;
+  }
+
+  void SetFixedEmbeddings(const Matrix<Real> &fixed_embeddings) {
+    // Assumes the word ids of the fixed embeddings are contiguous,
+    // starting in zero up to num_words_fixed_.
+    E_fixed_ = fixed_embeddings;
+    num_words_fixed_ = E_fixed_.cols();
+  }
+
+  void ResetGradients() {
+    dE_.setZero(embedding_dimension_, num_words_ - num_words_fixed_);
+  }
+
+  void RunForward() {
+    this->GetMutableOutput()->setZero(embedding_dimension_,
+                                      input_sequence_->size());
+    assert(this->GetMutableOutput()->rows() == embedding_dimension_ &&
+           this->GetMutableOutput()->cols() == input_sequence_->size());
+    for (int t = 0; t < input_sequence_->size(); ++t) {
+      int wid = (*input_sequence_)[t].wid();
+      assert(wid >= 0 && wid < num_words_);
+      if (wid >= num_words_fixed_) {
+        // Dynamic embedding.
+        this->GetMutableOutput()->col(t) = E_.col(wid - num_words_fixed_);
+      } else {
+        this->GetMutableOutput()->col(t) = E_fixed_.col(wid);
+      }
+    }
+  }
+
+  void RunBackward() {
+    // Don't have input derivatives (they're dense and expensive and not
+    // necessary.)
+    for (int t = 0; t < input_sequence_->size(); ++t) {
+      int wid = (*input_sequence_)[t].wid();
+      assert(wid >= 0 && wid < num_words_);
+      // Don't need to do anything for the fixed embeddings.
+      if (wid >= num_words_fixed_) {
+        // Dynamic embedding.
+        dE_.col(wid - num_words_fixed_) += this->GetMutableOutput()->col(t);
+      }
+    }
+  }
+
+  void set_input_sequence(const std::vector<Input> &input_sequence) {
+    input_sequence_ = &input_sequence;
+  }
+
+ public:
+  int num_words_fixed_;
+  int num_words_;
+  int embedding_dimension_;
+  Matrix<Real> E_fixed_;
+  Matrix<Real> E_;
+  Matrix<Real> dE_;
+  const std::vector<Input> *input_sequence_; // Input.
+};
+
+#if 0
 template<typename Real> class LookupLayer : public Layer<Real> {
  public:
   LookupLayer(int num_words, int embedding_dimension) {
@@ -576,6 +700,7 @@ template<typename Real> class LookupLayer : public Layer<Real> {
 
   const std::vector<Input> *input_sequence_; // Input.
 };
+#endif
 
 template<typename Real> class LinearLayer : public Layer<Real> {
  public:
@@ -1162,9 +1287,9 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
   }
 
   virtual void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
-				    std::vector<Vector<Real>*> *biases,
-				    std::vector<std::string> *weight_names,
-				    std::vector<std::string> *bias_names) {
+                                    std::vector<Vector<Real>*> *biases,
+                                    std::vector<std::string> *weight_names,
+                                    std::vector<std::string> *bias_names) {
     RNNLayer<Real>::CollectAllParameters(weights, biases, weight_names,
                                          bias_names);
 
@@ -1223,6 +1348,7 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
   }
 
   virtual void RunForward() {
+    assert(this->GetNumInputs() == 1 || this->use_control_);
     const Matrix<Real> &x = *(this->inputs_[0]);
 
     int length = x.cols();
@@ -1236,9 +1362,9 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     Vector<Real> hprev = Vector<Real>::Zero(this->GetMutableOutput()->rows());
     if (this->use_hidden_start_) {
       if (!this->use_control_) {
-	hprev = this->h0_;
+        hprev = this->h0_;
       } else {
-	hprev = *(this->inputs_[1]);
+        hprev = *(this->inputs_[1]);
       }
     }
     Vector<Real> result;
@@ -1289,14 +1415,14 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
       Vector<Real> hprev;
       if (t == 0) {
         // hprev = Vector<Real>::Zero(this->GetMutableOutput()->rows()); <- LOOKS LIKE A BUG.
-	hprev = Vector<Real>::Zero(this->GetMutableOutput()->rows());
-	if (this->use_hidden_start_) {
-	  if (!this->use_control_) {
-	    hprev = this->h0_;
-	  } else {
-	    hprev = *(this->inputs_[1]);
-	  }
-	}
+        hprev = Vector<Real>::Zero(this->GetMutableOutput()->rows());
+        if (this->use_hidden_start_) {
+          if (!this->use_control_) {
+            hprev = this->h0_;
+          } else {
+            hprev = *(this->inputs_[1]);
+          }
+        }
       } else {
         hprev = this->GetMutableOutput()->col(t-1);
       }
@@ -1335,9 +1461,9 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
 
     if (this->use_hidden_start_) {
       if (!this->use_control_) {
-	this->dh0_.noalias() += dhnext;
+        this->dh0_.noalias() += dhnext;
       } else {
-	*(this->input_derivatives_[1]) += dhnext;
+        *(this->input_derivatives_[1]) += dhnext;
       }
     }
   }
@@ -1366,12 +1492,13 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
  public:
   LSTMLayer() {}
   LSTMLayer(int input_size,
-	    int hidden_size) {
+            int hidden_size) {
     this->name_ = "LSTM";
     this->activation_function_ = ActivationFunctions::TANH;
     this->input_size_ = input_size;
     this->hidden_size_ = hidden_size;
     this->use_hidden_start_ = true;
+    this->use_control_ = false;
   }
   virtual ~LSTMLayer() {}
 
@@ -1387,18 +1514,17 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     bi_ = Vector<Real>::Zero(this->hidden_size_);
     bf_ = Vector<Real>::Zero(this->hidden_size_);
     bo_ = Vector<Real>::Zero(this->hidden_size_);
-    if (this->use_hidden_start_) {
+    if (this->use_hidden_start_ && !this->use_control_) {
       c0_ = Vector<Real>::Zero(this->hidden_size_);
-    } 
+    }
   }
 
   virtual void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
-				    std::vector<Vector<Real>*> *biases,
-				    std::vector<std::string> *weight_names,
-				    std::vector<std::string> *bias_names) {
+                                    std::vector<Vector<Real>*> *biases,
+                                    std::vector<std::string> *weight_names,
+                                    std::vector<std::string> *bias_names) {
     RNNLayer<Real>::CollectAllParameters(weights, biases, weight_names,
                                          bias_names);
-
     weights->push_back(&Wxi_);
     weights->push_back(&Whi_);
     weights->push_back(&Wxf_);
@@ -1409,7 +1535,7 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     biases->push_back(&bi_);
     biases->push_back(&bf_);
     biases->push_back(&bo_);
-    if (this->use_hidden_start_) {
+    if (this->use_hidden_start_ && !this->use_control_) {
       biases->push_back(&c0_); // Not really a bias, but it goes here.
     }
 
@@ -1423,7 +1549,7 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     bias_names->push_back("bi");
     bias_names->push_back("bf");
     bias_names->push_back("bo");
-    if (this->use_hidden_start_) {
+    if (this->use_hidden_start_ && !this->use_control_) {
       bias_names->push_back("c0");
     }
   }
@@ -1442,7 +1568,7 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     bias_derivatives->push_back(&dbi_);
     bias_derivatives->push_back(&dbf_);
     bias_derivatives->push_back(&dbo_);
-    if (this->use_hidden_start_) {
+    if (this->use_hidden_start_ && !this->use_control_) {
       bias_derivatives->push_back(&dc0_); // Not really a bias, but it goes here.
     }
   }
@@ -1454,7 +1580,7 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     // Weights controlling gates have logistic activations.
     if (this->activation_function_ == ActivationFunctions::LOGISTIC ||
         W == &Wxi_ || W == &Whi_ || W == &Wxf_ || W == &Whf_ ||
-	W == &Wxo_ || W == &Who_) {
+        W == &Wxo_ || W == &Who_) {
       coeff = 4.0;
     } else {
       coeff = 1.0;
@@ -1473,13 +1599,14 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     dbi_.setZero(this->hidden_size_);
     dbf_.setZero(this->hidden_size_);
     dbo_.setZero(this->hidden_size_);
-    if (this->use_hidden_start_) {
+    if (this->use_hidden_start_ && !this->use_control_) {
       dc0_.setZero(this->hidden_size_);
     }
   }
 
   virtual void RunForward() {
-    const Matrix<Real> &x = this->GetInput();
+    assert(this->GetNumInputs() == 1 || this->use_control_);
+    const Matrix<Real> &x = *(this->inputs_[0]);
 
     int length = x.cols();
     i_.setZero(this->hidden_size_, length);
@@ -1488,16 +1615,21 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     cu_.setZero(this->hidden_size_, length);
     c_.setZero(this->hidden_size_, length);
     hu_.setZero(this->hidden_size_, length);
-    this->GetMutableOutput()->setZero(this->hidden_size_, length);
+    this->outputs_[0].setZero(this->hidden_size_, length);
     Matrix<Real> iraw = (Wxi_ * x).colwise() + bi_;
     Matrix<Real> fraw = (Wxf_ * x).colwise() + bf_;
     Matrix<Real> oraw = (Wxo_ * x).colwise() + bo_;
     Matrix<Real> curaw = (this->Wxh_ * x).colwise() + this->bh_;
-    Vector<Real> hprev = Vector<Real>::Zero(this->GetMutableOutput()->rows());
-    Vector<Real> cprev = Vector<Real>::Zero(this->GetMutableOutput()->rows());
+    Vector<Real> hprev = Vector<Real>::Zero(this->hidden_size_);
+    Vector<Real> cprev = Vector<Real>::Zero(this->hidden_size_);
     if (this->use_hidden_start_) {
-      hprev = this->h0_;
-      cprev = this->c0_;
+      if (!this->use_control_) {
+        hprev = this->h0_;
+        cprev = this->c0_;
+      } else {
+        hprev = Vector<Real>::Zero(this->hidden_size_);
+        cprev = *(this->inputs_[1]);
+      }
     }
     Vector<Real> result;
     Vector<Real> tmp;
@@ -1534,21 +1666,22 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
                          &result);
       hu_.col(t) = result;
 
-      this->GetMutableOutput()->col(t) = o_.col(t).cwiseProduct(hu_.col(t));
+      this->outputs_[0].col(t) = o_.col(t).cwiseProduct(hu_.col(t));
 
-      hprev = this->GetMutableOutput()->col(t);
+      hprev = this->outputs_[0].col(t);
       cprev = c_.col(t);
     }
+    this->outputs_[1] = c_; // TODO: don't duplicate these variables.
   }
 
   virtual void RunBackward() {
-    const Matrix<Real> &x = this->GetInput();
-    Matrix<Real> *dx = this->GetInputDerivative();
+    const Matrix<Real> &x = *(this->inputs_[0]);
+    Matrix<Real> *dx = this->input_derivatives_[0];
 
     Vector<Real> dhnext = Vector<Real>::Zero(this->Whh_.rows());
     Vector<Real> dcnext = Vector<Real>::Zero(this->hidden_size_);
     //Vector<Real> fnext = Vector<Real>::Zero(this->hidden_size_);
-    const Matrix<Real> &dy = this->GetOutputDerivative();
+    const Matrix<Real> &dy = this->output_derivatives_[0];
 
     Matrix<Real> dcuraw;
     DerivateActivation(this->activation_function_, cu_, &dcuraw);
@@ -1567,12 +1700,17 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
       Vector<Real> dhu = o_.col(t).cwiseProduct(dh);
       Vector<Real> dout = hu_.col(t).cwiseProduct(dh);
 
-      Vector<Real> dc = dhuraw.col(t).cwiseProduct(dhu) + dcnext; //dcnext.cwiseProduct(fnext);
+      Vector<Real> dc = this->output_derivatives_[1].col(t);
+      dc += dhuraw.col(t).cwiseProduct(dhu) + dcnext;
 
       Vector<Real> cprev;
       if (t == 0) {
         if (this->use_hidden_start_) {
-          cprev = c0_;
+          if (!this->use_control_) {
+            cprev = c0_;
+          } else {
+            cprev = *(this->inputs_[1]);
+          }
         } else {
           cprev = Vector<Real>::Zero(c_.rows());
         }
@@ -1612,17 +1750,21 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     this->dbh_.noalias() += dcuraw.rowwise().sum();
 
     dWhi_.noalias() += diraw.rightCols(length-1) *
-      this->GetMutableOutput()->leftCols(length-1).transpose();
+      this->outputs_[0].leftCols(length-1).transpose();
     dWhf_.noalias() += dfraw.rightCols(length-1) *
-      this->GetMutableOutput()->leftCols(length-1).transpose();
+      this->outputs_[0].leftCols(length-1).transpose();
     dWho_.noalias() += doraw.rightCols(length-1) *
-      this->GetMutableOutput()->leftCols(length-1).transpose();
+      this->outputs_[0].leftCols(length-1).transpose();
     this->dWhh_.noalias() += dcuraw.rightCols(length-1) *
-      this->GetMutableOutput()->leftCols(length-1).transpose();
+      this->outputs_[0].leftCols(length-1).transpose();
 
     if (this->use_hidden_start_) {
-      this->dh0_.noalias() += dhnext;
-      this->dc0_.noalias() += dcnext; //.cwiseProduct(fnext);
+      if (!this->use_control_) {
+        this->dh0_.noalias() += dhnext;
+        this->dc0_.noalias() += dcnext;
+      } else {
+        *(this->input_derivatives_[1]) += dcnext;
+      }
     }
   }
 

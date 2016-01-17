@@ -20,8 +20,13 @@ using Matrix = Eigen::Matrix<Real, Eigen::Dynamic, Eigen::Dynamic>;
 template<typename Real>
 using Vector = Eigen::Matrix<Real, Eigen::Dynamic, 1>;
 
+#if 0
 typedef Matrix<float> FloatMatrix;
 typedef Vector<float> FloatVector;
+#else
+typedef Matrix<double> FloatMatrix;
+typedef Vector<double> FloatVector;
+#endif
 typedef Matrix<double> DoubleMatrix;
 typedef Vector<double> DoubleVector;
 
