@@ -423,9 +423,11 @@ class RNN {
     double total_loss = 0.0;
     double accuracy = 0.0;
     int num_sentences = input_sequences.size();
+    int actual_batch_size = 0;
     for (int i = 0; i < input_sequences.size(); ++i) {
       if (i % batch_size == 0) {
         ResetParameterGradients();
+        actual_batch_size = 0;
       }
       RunForwardPass(input_sequences[i]);
       FloatVector p = output_layer_->GetOutput(0);
@@ -438,8 +440,10 @@ class RNN {
       total_loss += loss;
       RunBackwardPass(input_sequences[i], output_labels[i], learning_rate,
                       regularization_constant);
+      ++actual_batch_size;
       if (((i+1) % batch_size == 0) || (i == input_sequences.size()-1)) {
-        UpdateParameters(batch_size, learning_rate, regularization_constant);
+        UpdateParameters(actual_batch_size, learning_rate,
+                         regularization_constant);
       }
     }
     accuracy /= num_sentences;

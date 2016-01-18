@@ -55,7 +55,8 @@ template<typename Real> class Layer {
       auto b = biases[i];
       auto db = bias_derivatives[i];
       (*db) /= static_cast<double>(batch_size);
-      (*db) += (regularization_constant * (*b));
+      // Note: the biases are not regularized.
+      //(*db) += (regularization_constant * (*b));
       *b -= learning_rate * (*db);
     }
 
@@ -138,7 +139,8 @@ template<typename Real> class Layer {
       auto db = bias_derivatives[i];
 
       (*db) /= static_cast<double>(batch_size);
-      (*db) += (regularization_constant * (*b));
+      // Note: the biases are not regularized.
+      // (*db) += (regularization_constant * (*b));
 
       auto mb = first_bias_moments_[i];
       auto vb = second_bias_moments_[i];
