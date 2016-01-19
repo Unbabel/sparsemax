@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <Eigen/Dense>
 #include <cmath>
 #include "utils.h"
@@ -346,6 +347,10 @@ class RNN {
     network_.SortLayersByTopologicalOrder();
   }
 
+  void SetModelPrefix(const std::string &model_prefix) {
+    model_prefix_ = model_prefix;
+  }
+
   int GetEmbeddingSize() { return lookup_layer_->embedding_dimension(); }
 
   int GetInputSize() { return linear_layer_->output_size(); }
@@ -366,6 +371,25 @@ class RNN {
       for (int k = 0; k < layers.size(); ++k) {
         layers[k]->InitializeADAM(beta1, beta2, epsilon);
       }
+    }
+  }
+
+  void LoadModel(const std::string &prefix) {
+    const std::vector<FloatLayer*> &layers = network_.GetLayers();
+    for (int k = 0; k < layers.size(); ++k) {
+      std::ostringstream ss;
+      ss << "Layer" << k << "_" << layers[k]->name() + "_";
+      layers[k]->LoadParameters(prefix + ss.str(), true);
+    }
+  }
+
+  void SaveModel(const std::string &prefix) {
+    const std::vector<FloatLayer*> &layers = network_.GetLayers();
+    for (int k = 0; k < layers.size(); ++k) {
+      std::ostringstream ss;
+      ss << "Layer" << k << "_" << layers[k]->name() + "_";
+      //layers[k]->SaveParameters(prefix + ss.str(), false);
+      layers[k]->SaveParameters(prefix + ss.str(), true);
     }
   }
 
@@ -399,13 +423,17 @@ class RNN {
               << std::endl;
 
     //assert(false);
-
+    SaveModel(model_prefix_ + "Epoch0_");
     for (int epoch = 0; epoch < num_epochs; ++epoch) {
+      std::ostringstream ss;
       TrainEpoch(input_sequences, output_labels,
                  input_sequences_dev, output_labels_dev,
                  input_sequences_test, output_labels_test,
                  epoch, batch_size, learning_rate, regularization_constant);
+      ss << "Epoch" << epoch+1 << "_";
+      SaveModel(model_prefix_ + ss.str());
     }
+    SaveModel(model_prefix_);
   }
 
   void TrainEpoch(const std::vector<std::vector<Input> > &input_sequences,
@@ -455,6 +483,13 @@ class RNN {
         layers[k]->ComputeSquaredNormOfParameters();
     }
 
+    write_attention_probabilities_ = true;
+    if (sparse_attention_) {
+      os_attention_.open("sparse_attention.txt", std::ifstream::out);
+    } else {
+      os_attention_.open("soft_attention.txt", std::ifstream::out);
+    }
+
     double accuracy_dev = 0.0;
     int num_sentences_dev = input_sequences_dev.size();
     for (int i = 0; i < input_sequences_dev.size(); ++i) {
@@ -466,12 +501,7 @@ class RNN {
     }
     accuracy_dev /= num_sentences_dev;
 
-    write_attention_probabilities_ = true;
-    if (sparse_attention_) {
-      os_attention_.open("sparse_attention_separate_rnns.txt", std::ifstream::out);
-    } else {
-      os_attention_.open("soft_attention_separate_rnns.txt", std::ifstream::out);
-    }
+    write_attention_probabilities_ = false;
 
     double accuracy_test = 0.0;
     int num_sentences_test = input_sequences_test.size();
@@ -484,7 +514,6 @@ class RNN {
     }
     accuracy_test /= num_sentences_test;
 
-    write_attention_probabilities_ = false;
     os_attention_.flush();
     os_attention_.clear();
     os_attention_.close();
@@ -496,6 +525,55 @@ class RNN {
               << " Total loss+reg: " << total_loss + total_reg
               << " Accuracy train: " << accuracy
               << " Accuracy dev: " << accuracy_dev
+              << " Accuracy test: " << accuracy_test
+              << " Time: " << diff_ms(end,start)
+              << std::endl;
+  }
+
+  void Test(const std::vector<std::vector<Input> > &input_sequences_dev,
+            const std::vector<int> &output_labels_dev,
+            const std::vector<std::vector<Input> > &input_sequences_test,
+            const std::vector<int> &output_labels_test) {
+    timeval start, end;
+    gettimeofday(&start, NULL);
+
+    write_attention_probabilities_ = true;
+    if (sparse_attention_) {
+      os_attention_.open("sparse_attention_test.txt", std::ifstream::out);
+    } else {
+      os_attention_.open("soft_attention_test.txt", std::ifstream::out);
+    }
+
+    double accuracy_dev = 0.0;
+    int num_sentences_dev = input_sequences_dev.size();
+    for (int i = 0; i < input_sequences_dev.size(); ++i) {
+      int predicted_label;
+      Run(input_sequences_dev[i], &predicted_label);
+      if (output_labels_dev[i] == predicted_label) {
+        accuracy_dev += 1.0;
+      }
+    }
+    accuracy_dev /= num_sentences_dev;
+
+    write_attention_probabilities_ = false;
+
+    double accuracy_test = 0.0;
+    int num_sentences_test = input_sequences_test.size();
+    for (int i = 0; i < input_sequences_test.size(); ++i) {
+      int predicted_label;
+      Run(input_sequences_test[i], &predicted_label);
+      if (output_labels_test[i] == predicted_label) {
+        accuracy_test += 1.0;
+      }
+    }
+    accuracy_test /= num_sentences_test;
+
+    os_attention_.flush();
+    os_attention_.clear();
+    os_attention_.close();
+
+    gettimeofday(&end, NULL);
+    std::cout << " Accuracy dev: " << accuracy_dev
               << " Accuracy test: " << accuracy_test
               << " Time: " << diff_ms(end,start)
               << std::endl;
@@ -554,7 +632,11 @@ class RNN {
     }
 
     if (use_attention_ && write_attention_probabilities_) {
-      os_attention_ << attention_layer_->GetAttentionProbabilities().transpose()
+      int prediction;
+      FloatVector p = output_layer_->GetOutput(0);
+      p.maxCoeff(&prediction);
+      os_attention_ << dictionary_->GetLabelName(prediction) << "\t"
+                    << attention_layer_->GetAttentionProbabilities().transpose()
                     << std::endl;
     }
   }
@@ -614,7 +696,7 @@ class RNN {
   FloatLinearLayer *linear_layer_after_rnn_;
   FloatAttentionLayer *attention_layer_;
   FloatFeedforwardLayer *feedforward_layer_;
-  FloatAverageLayer *average_layer_;
+  FloatAverageLayer *average_layer_ = NULL; // Remove this variable?
   FloatSelectorLayer *hypothesis_selector_layer_;
   FloatSelectorLayer *premise_selector_layer_;
   FloatSelectorLayer *hypothesis_extractor_layer_;
@@ -635,8 +717,8 @@ class RNN {
   bool use_average_layer_;
   bool use_ADAM_;
   bool write_attention_probabilities_;
+  std::string model_prefix_;
   std::ofstream os_attention_;
-
   //FloatMatrix x_;
   //FloatMatrix h_;
 };

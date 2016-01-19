@@ -208,7 +208,7 @@ template<typename Real> class Layer {
     }
   }
 
-  void ReadParameters() {
+  void LoadParameters(const std::string &prefix, bool binary_mode) {
     std::vector<Matrix<Real>*> weights;
     std::vector<Vector<Real>*> biases;
     std::vector<std::string> weight_names;
@@ -218,14 +218,53 @@ template<typename Real> class Layer {
     for (int i = 0; i < biases.size(); ++i) {
       auto b = biases[i];
       auto name = bias_names[i];
-      std::cout << "Loading " << name << "..." << std::endl;
-      LoadVectorParameter(name, b);
+      if (binary_mode) {
+        LoadVectorParameter(prefix, name, b);
+      } else {
+        std::cout << "Loading " << name << "..." << std::endl;
+        ReadVectorParameter(prefix, name, b);
+      }
     }
     for (int i = 0; i < weights.size(); ++i) {
       auto W = weights[i];
       auto name = weight_names[i];
-      std::cout << "Loading " << name << "..." << std::endl;
-      LoadMatrixParameter(name, W);
+      if (binary_mode) {
+        LoadMatrixParameter(prefix, name, W);
+      } else {
+        std::cout << "Loading " << name << "..." << std::endl;
+        ReadMatrixParameter(prefix, name, W);
+      }
+    }
+  }
+
+  void SaveParameters(const std::string &prefix, bool binary_mode) {
+    std::vector<Matrix<Real>*> weights;
+    std::vector<Vector<Real>*> biases;
+    std::vector<std::string> weight_names;
+    std::vector<std::string> bias_names;
+    CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
+
+    for (int i = 0; i < biases.size(); ++i) {
+      auto b = biases[i];
+      auto name = bias_names[i];
+      if (binary_mode) {
+        SaveVectorParameter(prefix, name, b);
+      } else {
+        // TODO: Implement this function.
+        assert(false);
+        //WriteVectorParameter(prefix, name, b);
+      }
+    }
+    for (int i = 0; i < weights.size(); ++i) {
+      auto W = weights[i];
+      auto name = weight_names[i];
+      if (binary_mode) {
+        SaveMatrixParameter(prefix, name, W);
+      } else {
+        // TODO: Implement this function.
+        assert(false);
+        //WriteMatrixParameter(prefix, name, W);
+      }
     }
   }
 

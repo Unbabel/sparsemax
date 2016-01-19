@@ -111,17 +111,19 @@ void ReadDataset(const std::string &dataset_file,
 }
 
 int main(int argc, char** argv) {
-  std::string train_file = argv[1];
-  std::string dev_file = argv[2];
-  std::string test_file = argv[3];
-  std::string word_vector_file = argv[4];
-  bool use_attention = static_cast<bool>(atoi(argv[5]));
-  bool sparse_attention = static_cast<bool>(atoi(argv[6]));
-  int num_hidden_units = atoi(argv[7]);
-  int num_epochs = atoi(argv[8]);
-  int batch_size = atoi(argv[9]);
-  double learning_rate = atof(argv[10]);
-  double regularization_constant = atof(argv[11]);
+  std::string mode = argv[1]; // "train" or "test".
+  std::string train_file = argv[2];
+  std::string dev_file = argv[3];
+  std::string test_file = argv[4];
+  std::string word_vector_file = argv[5];
+  bool use_attention = static_cast<bool>(atoi(argv[6]));
+  bool sparse_attention = static_cast<bool>(atoi(argv[7]));
+  int num_hidden_units = atoi(argv[8]);
+  int num_epochs = atoi(argv[9]);
+  int batch_size = atoi(argv[10]);
+  double learning_rate = atof(argv[11]);
+  double regularization_constant = atof(argv[12]);
+  std::string model_prefix = argv[13];
 
   int embedding_dimension = 300; //64;
   int word_cutoff = 1;
@@ -179,10 +181,20 @@ int main(int argc, char** argv) {
           num_hidden_units, dictionary.GetNumLabels(),
           use_attention, sparse_attention);
   //rnn.SetFixedEmbeddings(fixed_embeddings, word_ids);
+  rnn.SetModelPrefix(model_prefix);
   rnn.SetFixedEmbeddings(fixed_embeddings);
-  rnn.InitializeParameters();
-  rnn.Train(input_sequences, output_labels,
-            input_sequences_dev, output_labels_dev,
-            input_sequences_test, output_labels_test,
-            num_epochs, batch_size, learning_rate, regularization_constant);
+
+  if (mode == "train") {
+    rnn.InitializeParameters();
+    rnn.Train(input_sequences, output_labels,
+              input_sequences_dev, output_labels_dev,
+              input_sequences_test, output_labels_test,
+              num_epochs, batch_size, learning_rate, regularization_constant);
+  } else {
+    // mode == "test".
+    rnn.InitializeParameters();
+    rnn.LoadModel(model_prefix);
+    rnn.Test(input_sequences_dev, output_labels_dev,
+             input_sequences_test, output_labels_test);
+  }
 }

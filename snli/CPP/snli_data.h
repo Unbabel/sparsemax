@@ -76,6 +76,17 @@ class Dictionary {
     assert(false); // Cannot be unknown symbol.
   }
 
+  const std::string &GetLabelName(int lid) const {
+    return label_names_[lid];
+  }
+
+  void BuildLabelNames() {
+    label_names_.resize(label_alphabet_.size());
+    for (auto it = label_alphabet_.begin(); it != label_alphabet_.end(); ++it) {
+      label_names_[it->second] = it->first;
+    }
+  }
+
   void AddWordsFromDataset(const std::vector<Sentence*> &dataset,
                            int word_cutoff,
                            int affix_cutoff) {
@@ -175,6 +186,8 @@ class Dictionary {
       }
     }
 
+    BuildLabelNames();
+
     std::cout << "Number of words before cutoff: " << word_alphabet.size()
               << std::endl;
     std::cout << "Number of prefixes before cutoff: " << prefix_alphabet.size()
@@ -225,6 +238,7 @@ class Dictionary {
   std::unordered_map<std::string, int> prefix_alphabet_;
   std::unordered_map<std::string, int> suffix_alphabet_;
   std::unordered_map<std::string, int> label_alphabet_;
+  std::vector<std::string> label_names_;
 };
 
 class Input {
