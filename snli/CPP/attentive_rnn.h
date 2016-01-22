@@ -380,6 +380,9 @@ class RNN {
       std::ostringstream ss;
       ss << "Layer" << k << "_" << layers[k]->name() + "_";
       layers[k]->LoadParameters(prefix + ss.str(), true);
+      if (use_ADAM_) {
+        layers[k]->LoadADAMParameters(prefix + ss.str());
+      }
     }
   }
 
@@ -390,6 +393,9 @@ class RNN {
       ss << "Layer" << k << "_" << layers[k]->name() + "_";
       //layers[k]->SaveParameters(prefix + ss.str(), false);
       layers[k]->SaveParameters(prefix + ss.str(), true);
+      if (use_ADAM_) {
+        layers[k]->SaveADAMParameters(prefix + ss.str());
+      }
     }
   }
 
@@ -403,28 +409,38 @@ class RNN {
              const std::vector<int> &output_labels_dev,
              const std::vector<std::vector<Input> > &input_sequences_test,
              const std::vector<int> &output_labels_test,
+             int warm_start_on_epoch, // 0 for no warm-starting.
              int num_epochs,
              int batch_size,
              double learning_rate,
              double regularization_constant) {
 
-    // Initial performance.
-    double accuracy_dev = 0.0;
-    int num_sentences_dev = input_sequences_dev.size();
-    for (int i = 0; i < input_sequences_dev.size(); ++i) {
-      int predicted_label;
-      Run(input_sequences_dev[i], &predicted_label);
-      if (output_labels_dev[i] == predicted_label) {
-        accuracy_dev += 1.0;
+    if (warm_start_on_epoch == 0) {
+      // Initial performance.
+      double accuracy_dev = 0.0;
+      int num_sentences_dev = input_sequences_dev.size();
+      for (int i = 0; i < input_sequences_dev.size(); ++i) {
+        int predicted_label;
+        Run(input_sequences_dev[i], &predicted_label);
+        if (output_labels_dev[i] == predicted_label) {
+          accuracy_dev += 1.0;
+        }
       }
-    }
-    accuracy_dev /= num_sentences_dev;
-    std::cout << " Initial accuracy dev: " << accuracy_dev
-              << std::endl;
+      accuracy_dev /= num_sentences_dev;
+      std::cout << " Initial accuracy dev: " << accuracy_dev
+                << std::endl;
 
-    //assert(false);
-    SaveModel(model_prefix_ + "Epoch0_");
-    for (int epoch = 0; epoch < num_epochs; ++epoch) {
+      //assert(false);
+      SaveModel(model_prefix_ + "Epoch0_");
+    } else {
+      std::cout << "Warm-starting on epoch " << warm_start_on_epoch
+                << "..." << std::endl;
+      std::ostringstream ss;
+      ss << "Epoch" << warm_start_on_epoch << "_";
+      LoadModel(model_prefix_ + ss.str());
+    }
+
+    for (int epoch = warm_start_on_epoch; epoch < num_epochs; ++epoch) {
       std::ostringstream ss;
       TrainEpoch(input_sequences, output_labels,
                  input_sequences_dev, output_labels_dev,
@@ -433,6 +449,7 @@ class RNN {
       ss << "Epoch" << epoch+1 << "_";
       SaveModel(model_prefix_ + ss.str());
     }
+
     SaveModel(model_prefix_);
   }
 

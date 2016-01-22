@@ -94,10 +94,47 @@ void ReadVectorParameter(const std::string &prefix, const std::string &name,
 }
 
 template<typename Real>
-void LoadMatrixParameter(const std::string &prefix, const std::string &name,
-                         Matrix<Real> *W) {
+void LoadMatrixParameterFromFile(const std::string &prefix,
+                                 const std::string &name,
+                                 Matrix<Real> *W) {
   std::string param_file = prefix + name + ".bin";
   FILE *fs = fopen(param_file.c_str(), "rb");
+  LoadMatrixParameter(fs, W);
+  fclose(fs);
+}
+
+template<typename Real>
+void LoadVectorParameterFromFile(const std::string &prefix,
+                                 const std::string &name,
+                                 Vector<Real> *b) {
+  std::string param_file = prefix + name + ".bin";
+  FILE *fs = fopen(param_file.c_str(), "rb");
+  LoadVectorParameter(fs, b);
+  fclose(fs);
+}
+
+template<typename Real>
+void SaveMatrixParameterToFile(const std::string &prefix,
+                               const std::string &name,
+                               Matrix<Real> *W) {
+  std::string param_file = prefix + name + ".bin";
+  FILE *fs = fopen(param_file.c_str(), "wb");
+  SaveMatrixParameter(fs, W);
+  fclose(fs);
+}
+
+template<typename Real>
+void SaveVectorParameterToFile(const std::string &prefix,
+                               const std::string &name,
+                               Vector<Real> *b) {
+  std::string param_file = prefix + name + ".bin";
+  FILE *fs = fopen(param_file.c_str(), "wb");
+  SaveVectorParameter(fs, b);
+  fclose(fs);
+}
+
+template<typename Real>
+void LoadMatrixParameter(FILE *fs, Matrix<Real> *W) {
   int num_rows, num_columns;
   if (1 != fread(&num_rows, sizeof(int), 1, fs)) assert(false);
   if (1 != fread(&num_columns, sizeof(int), 1, fs)) assert(false);
@@ -108,14 +145,10 @@ void LoadMatrixParameter(const std::string &prefix, const std::string &name,
       (*W)(i, j) = value;
     }
   }
-  fclose(fs);
 }
 
 template<typename Real>
-void LoadVectorParameter(const std::string &prefix, const std::string &name,
-                         Vector<Real> *b) {
-  std::string param_file = prefix + name + ".bin";
-  FILE *fs = fopen(param_file.c_str(), "rb");
+void LoadVectorParameter(FILE *fs, Vector<Real> *b) {
   int length;
   if (1 != fread(&length, sizeof(int), 1, fs)) assert(false);
   for (int j = 0; j < length; ++j) {
@@ -123,14 +156,10 @@ void LoadVectorParameter(const std::string &prefix, const std::string &name,
     if (1 != fread(&value, sizeof(double), 1, fs)) assert(false);
     (*b)(j) = value;
   }
-  fclose(fs);
 }
 
 template<typename Real>
-void SaveMatrixParameter(const std::string &prefix, const std::string &name,
-                         Matrix<Real> *W) {
-  std::string param_file = prefix + name + ".bin";
-  FILE *fs = fopen(param_file.c_str(), "wb");
+void SaveMatrixParameter(FILE *fs, Matrix<Real> *W) {
   int num_rows = W->rows();
   int num_columns = W->cols();
   if (1 != fwrite(&num_rows, sizeof(int), 1, fs)) assert(false);
@@ -141,21 +170,16 @@ void SaveMatrixParameter(const std::string &prefix, const std::string &name,
       if (1 != fwrite(&value, sizeof(double), 1, fs)) assert(false);
     }
   }
-  fclose(fs);
 }
 
 template<typename Real>
-void SaveVectorParameter(const std::string &prefix, const std::string &name,
-                         Vector<Real> *b) {
-  std::string param_file = prefix + name + ".bin";
-  FILE *fs = fopen(param_file.c_str(), "wb");
+void SaveVectorParameter(FILE *fs, Vector<Real> *b) {
   int length = b->size();
   if (1 != fwrite(&length, sizeof(int), 1, fs)) assert(false);
   for (int j = 0; j < length; ++j) {
     double value = (*b)(j);
     if (1 != fwrite(&value, sizeof(double), 1, fs)) assert(false);
   }
-  fclose(fs);
 }
 
 template<typename Real>

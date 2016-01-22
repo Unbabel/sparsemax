@@ -219,7 +219,7 @@ template<typename Real> class Layer {
       auto b = biases[i];
       auto name = bias_names[i];
       if (binary_mode) {
-        LoadVectorParameter(prefix, name, b);
+        LoadVectorParameterFromFile(prefix, name, b);
       } else {
         std::cout << "Loading " << name << "..." << std::endl;
         ReadVectorParameter(prefix, name, b);
@@ -229,7 +229,7 @@ template<typename Real> class Layer {
       auto W = weights[i];
       auto name = weight_names[i];
       if (binary_mode) {
-        LoadMatrixParameter(prefix, name, W);
+        LoadMatrixParameterFromFile(prefix, name, W);
       } else {
         std::cout << "Loading " << name << "..." << std::endl;
         ReadMatrixParameter(prefix, name, W);
@@ -248,7 +248,7 @@ template<typename Real> class Layer {
       auto b = biases[i];
       auto name = bias_names[i];
       if (binary_mode) {
-        SaveVectorParameter(prefix, name, b);
+        SaveVectorParameterToFile(prefix, name, b);
       } else {
         // TODO: Implement this function.
         assert(false);
@@ -259,13 +259,83 @@ template<typename Real> class Layer {
       auto W = weights[i];
       auto name = weight_names[i];
       if (binary_mode) {
-        SaveMatrixParameter(prefix, name, W);
+        SaveMatrixParameterToFile(prefix, name, W);
       } else {
         // TODO: Implement this function.
         assert(false);
         //WriteMatrixParameter(prefix, name, W);
       }
     }
+  }
+
+  void LoadADAMParameters(const std::string &prefix) {
+    std::string param_file = prefix + "ADAM" + ".bin";
+    FILE *fs = fopen(param_file.c_str(), "rb");
+    if (1 != fread(&iteration_number_, sizeof(int), 1, fs)) assert(false);
+    double value;
+    if (1 != fread(&value, sizeof(double), 1, fs)) assert(false);
+    beta1_ = value;
+    if (1 != fread(&value, sizeof(double), 1, fs)) assert(false);
+    beta2_ = value;
+    if (1 != fread(&value, sizeof(double), 1, fs)) assert(false);
+    epsilon_ = value;
+    int length;
+    if (1 != fread(&length, sizeof(int), 1, fs)) assert(false);
+    first_weight_moments_.resize(length);
+    for (int k = 0; k < length; ++k) {
+      LoadMatrixParameter(fs, first_weight_moments_[k]);
+    }
+    if (1 != fread(&length, sizeof(int), 1, fs)) assert(false);
+    first_bias_moments_.resize(length);
+    for (int k = 0; k < length; ++k) {
+      LoadVectorParameter(fs, first_bias_moments_[k]);
+    }
+    if (1 != fread(&length, sizeof(int), 1, fs)) assert(false);
+    second_weight_moments_.resize(length);
+    for (int k = 0; k < length; ++k) {
+      LoadMatrixParameter(fs, second_weight_moments_[k]);
+    }
+    if (1 != fread(&length, sizeof(int), 1, fs)) assert(false);
+    second_bias_moments_.resize(length);
+    for (int k = 0; k < length; ++k) {
+      LoadVectorParameter(fs, second_bias_moments_[k]);
+    }
+    fclose(fs);
+  }
+
+  void SaveADAMParameters(const std::string &prefix) {
+    std::string param_file = prefix + "ADAM" + ".bin";
+    FILE *fs = fopen(param_file.c_str(), "wb");
+    if (1 != fwrite(&iteration_number_, sizeof(int), 1, fs)) assert(false);
+    double value;
+    value = beta1_;
+    if (1 != fwrite(&value, sizeof(double), 1, fs)) assert(false);
+    value = beta2_;
+    if (1 != fwrite(&value, sizeof(double), 1, fs)) assert(false);
+    value = epsilon_;
+    if (1 != fwrite(&value, sizeof(double), 1, fs)) assert(false);
+    int length;
+    length = first_weight_moments_.size();
+    if (1 != fwrite(&length, sizeof(int), 1, fs)) assert(false);
+    for (int k = 0; k < length; ++k) {
+      SaveMatrixParameter(fs, first_weight_moments_[k]);
+    }
+    length = first_bias_moments_.size();
+    if (1 != fwrite(&length, sizeof(int), 1, fs)) assert(false);
+    for (int k = 0; k < length; ++k) {
+      SaveVectorParameter(fs, first_bias_moments_[k]);
+    }
+    length = second_weight_moments_.size();
+    if (1 != fwrite(&length, sizeof(int), 1, fs)) assert(false);
+    for (int k = 0; k < length; ++k) {
+      SaveMatrixParameter(fs, second_weight_moments_[k]);
+    }
+    length = second_bias_moments_.size();
+    if (1 != fwrite(&length, sizeof(int), 1, fs)) assert(false);
+    for (int k = 0; k < length; ++k) {
+      SaveVectorParameter(fs, second_bias_moments_[k]);
+    }
+    fclose(fs);
   }
 
   void CheckGradient(int num_checks, double delta) {
