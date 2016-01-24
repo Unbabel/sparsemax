@@ -41,7 +41,8 @@ void LoadWordVectors(const std::string &word_vector_file,
     }
   }
   is.close();
-  std::cout << "Loaded " << word_vectors->size() << " word vectors." << std::endl;
+  std::cout << "Loaded " << word_vectors->size() << " word vectors."
+            << std::endl;
 }
 
 void ReadDataset(const std::string &dataset_file,
@@ -119,13 +120,14 @@ int main(int argc, char** argv) {
   bool use_attention = static_cast<bool>(atoi(argv[6]));
   bool sparse_attention = static_cast<bool>(atoi(argv[7]));
   int num_hidden_units = atoi(argv[8]);
-  int num_epochs = atoi(argv[9]);
-  int batch_size = atoi(argv[10]);
-  double learning_rate = atof(argv[11]);
-  double regularization_constant = atof(argv[12]);
-  std::string model_prefix = argv[13];
+  int warm_start_on_epoch = atoi(argv[9]);
+  int num_epochs = atoi(argv[10]);
+  int batch_size = atoi(argv[11]);
+  double learning_rate = atof(argv[12]);
+  double regularization_constant = atof(argv[13]);
+  std::string model_prefix = argv[14];
 
-  int embedding_dimension = 300; //64;
+  //int embedding_dimension = 300; //64;
   int word_cutoff = 1;
 
   if (use_attention) {
@@ -145,6 +147,9 @@ int main(int argc, char** argv) {
   std::unordered_map<std::string, std::vector<double> > word_vectors;
   LoadWordVectors(word_vector_file, &word_vectors);
   int num_fixed_embeddings = word_vectors.size();
+  int embedding_dimension = word_vectors.begin()->second.size();
+  std::cout << "Original embedding dimension: " << embedding_dimension
+            << std::endl;
   FloatMatrix fixed_embeddings = FloatMatrix::Zero(embedding_dimension,
                                                    num_fixed_embeddings);
   //std::vector<int> word_ids;
@@ -189,6 +194,7 @@ int main(int argc, char** argv) {
     rnn.Train(input_sequences, output_labels,
               input_sequences_dev, output_labels_dev,
               input_sequences_test, output_labels_test,
+              warm_start_on_epoch,
               num_epochs, batch_size, learning_rate, regularization_constant);
   } else {
     // mode == "test".
