@@ -3,10 +3,13 @@ import pdb
 
 word_vectors_filepath = sys.argv[1]
 data_filepath = sys.argv[2]
+skip_first_line = False #True
 
 f = open(word_vectors_filepath)
 # Skip first line.
-f.readline()
+if skip_first_line:
+    print >> sys.stderr, 'Skipping first line...'
+    f.readline()
 index = 0
 word_indices = {}
 for line in f:
@@ -47,7 +50,11 @@ print >> sys.stderr, 'Number of unknown data words: %d' % num_unknown_words
 
 # Dump the new word vector file.
 f = open(word_vectors_filepath)
-print f.readline().rstrip('\n')
+if skip_first_line:
+    print >> sys.stderr, 'Skipping first line...'
+    print f.readline().rstrip('\n')
+else:
+    print 'Selection from %s' % word_vectors_filepath
 index = 0
 for line in f:
     line = line.rstrip('\n')

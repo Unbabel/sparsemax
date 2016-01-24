@@ -1,0 +1,57 @@
+soft attention
+===================
+
+eta = 0.0003
+lambda = 0.00001  overfits
+[KILLED]
+
+eta = 0.0003
+lambda = 0.0001  is working -- 79.65 by epoch 16
+
+eta = 0.0003
+lambda = 0.0003 slowly increasing -- 78.81 by epoch 16
+
+eta = 0.0003
+lambda = 0.001 very slow -- 70.48 by epoch 7
+
+eta = 0.00001
+lambda = 0.0001 too slow (small learning rate) -- 67.44
+[KILLED]
+
+eta = 0.001
+lambda = 0.0001 so far is working but improving slowly -- 78.28 by epoch 15
+
+eta = 0.0001
+lambda = 0.0001 slowly improving -- 77.29 by epoch 9
+
+eta = 0.0001
+lambda = 0.0003 -- very slowly improving -- 75.19 by epoch 9
+
+
+
+sparse attention
+===================
+
+eta = 0.0003
+lambda = 0.0001  is overfitting now -- 79.03 by epoch 17
+
+eta = 0.0003
+lambda = 0.0003 is slowly improving -- 77.58 by epoch 8
+
+
+no attention
+===================
+
+eta = 0.0003
+lambda = 0.0001  is working and still improving -- 78.73 by epoch 9, 79.04 by epoch 17
+
+eta = 0.0003
+lambda = 0.0003 is working and improving slowly -- 76.97 by epoch 8
+
+
+sparse attention, no jesus
+===================
+
+eta = 0.0003
+lambda = 0.0001 improving slowly -- 77.60 by epoch 13, 79.21 by epoch 26
+
