@@ -440,6 +440,17 @@ template<typename Real> class Layer {
   virtual void RunBackward() = 0;
   //virtual void UpdateParameters(double learning_rate) = 0;
 
+  void ApplyDropout(int k, double dropout_probability_) {
+    for (int i = 0; i < outputs_[k].rows(); ++i) {
+      for (int j = 0; j < outputs_[k].cols(); ++j) {
+        double value =  static_cast<double>(rand()) / RAND_MAX;
+        if (value < dropout_probability_) {
+          outputs_[k](i,j) = 0.0;
+        }
+      }
+    }
+  }
+
   int GetNumInputs() const { return inputs_.size(); }
   void SetNumInputs(int n) {
     inputs_.resize(n);

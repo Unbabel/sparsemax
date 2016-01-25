@@ -139,6 +139,8 @@ class RNN {
     use_bidirectional_rnns_ = false;
     use_linear_layer_after_rnn_ = false; //true;
     use_average_layer_ = false; //true;
+    apply_dropout_ = true; // false;
+    dropout_probability_ = 0.1;
     input_size_ = hidden_size; // Size of the projected embedded words.
     hidden_size_ = hidden_size;
     output_size_ = output_size;
@@ -598,7 +600,10 @@ class RNN {
 
   void Run(const std::vector<Input> &input_sequence,
            int *predicted_label) {
+    bool apply_dropout = apply_dropout_;
+    apply_dropout_ = false;
     RunForwardPass(input_sequence);
+    apply_dropout_ = apply_dropout;
     int prediction;
     FloatVector p = output_layer_->GetOutput(0);
     p.maxCoeff(&prediction);
@@ -646,6 +651,13 @@ class RNN {
     const std::vector<FloatLayer*> &layers = network_.GetLayers();
     for (int k = 0; k < layers.size(); ++k) {
       layers[k]->RunForward();
+      if (apply_dropout_) {
+        if (layers[k] == lookup_layer_) {
+          lookup_layer_->ApplyDropout(0, dropout_probability_);
+        } else if (layers[k] == hypothesis_rnn_layer_) {
+          hypothesis_selector_layer_->ApplyDropout(0, dropout_probability_);
+        }
+      }
     }
 
     if (use_attention_ && write_attention_probabilities_) {
@@ -732,6 +744,8 @@ class RNN {
   bool use_bidirectional_rnns_;
   bool use_linear_layer_after_rnn_;
   bool use_average_layer_;
+  bool apply_dropout_;
+  double dropout_probability_;
   bool use_ADAM_;
   bool write_attention_probabilities_;
   std::string model_prefix_;

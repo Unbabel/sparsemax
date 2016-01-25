@@ -16,7 +16,9 @@ for line in f:
     line = line.rstrip('\n')
     fields = line.split(' ')
     word = fields[0]
-    assert word not in word_indices, pdb.set_trace()
+    if word in word_indices:
+        print >> sys.stderr, 'Repeated word: %s' % word
+    #assert word not in word_indices, pdb.set_trace()
     word_indices[word] = index
     index += 1
 f.close()
