@@ -1,3 +1,46 @@
+no attention, glove
+===================
+
+eta = 0.0003
+lambda = 0.0001
+Epoch: 15 Total loss: 0.454709 Total reg: 0.0929241 Total loss+reg: 0.547633 Accuracy train: 0.820825 Accuracy dev: 0.800041 Accuracy test: 0.791735 Time: 2838990
+[KILLED]
+
+eta = 0.0003
+lambda = 0.0003
+[79.23 by epoch 18, still improving]
+
+soft attention, glove
+===================
+
+eta = 0.0003
+lambda = 0.0001
+Epoch: 11 Total loss: 0.451231 Total reg: 0.0859434 Total loss+reg: 0.537175 Accuracy train: 0.822334 Accuracy dev: 0.814875 Accuracy test: 0.80568 Time: 3102426
+[KILLED]
+
+eta = 0.0003
+lambda = 0.0003
+[80.39 by epoch 25, still improving]
+
+sparse attention, glove
+===================
+
+eta = 0.0003
+lambda = 0.0001
+Epoch: 17 Total loss: 0.419792 Total reg: 0.10108 Total loss+reg: 0.520872 Accuracy train: 0.836321 Accuracy dev: 0.811116 Accuracy test: 0.804458 Time: 3123710
+[KILLED]
+
+eta = 0.0003
+lambda = 0.0003
+[80.55 by epoch 24, still improving]
+
+
+===================
+===================
+===================
+
+
+
 soft attention
 ===================
 
@@ -10,7 +53,7 @@ lambda = 0.0001  is working -- 79.65 by epoch 16, then overfitting
 [KILLED]
 
 eta = 0.0003
-lambda = 0.0003 slowly increasing -- 79.16 by epoch 25
+lambda = 0.0003 slowly increasing -- 79.44 by epoch 32
 
 eta = 0.0003
 lambda = 0.001 very slow -- 72.15 by epoch 15
@@ -21,10 +64,10 @@ lambda = 0.0001 too slow (small learning rate) -- 67.44
 [KILLED]
 
 eta = 0.001
-lambda = 0.0001 so far is working but improving slowly -- 79.03 by epoch 24
+lambda = 0.0001 so far is working but improving slowly -- 79.08 by epoch 32
 
 eta = 0.0001
-lambda = 0.0001 slowly improving -- 79.14 by epoch 19
+lambda = 0.0001 slowly improving -- 79.43 by epoch 22
 
 eta = 0.0001
 lambda = 0.0003 -- very slowly improving -- 77.78 by epoch 18
@@ -37,6 +80,7 @@ sparse attention
 
 eta = 0.0003
 lambda = 0.0001  is overfitting now -- 79.67 by epoch 27 [starting to overfit]
+[KILL]
 
 eta = 0.0003
 lambda = 0.0003 is slowly improving -- 78.53 by epoch 17
