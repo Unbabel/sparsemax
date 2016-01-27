@@ -65,9 +65,11 @@ lambda = 0.0001 too slow (small learning rate) -- 67.44
 
 eta = 0.001
 lambda = 0.0001 so far is working but improving slowly -- 79.08 by epoch 32
+[KILLED]
 
 eta = 0.0001
 lambda = 0.0001 slowly improving -- 79.43 by epoch 22
+[KILLED]
 
 eta = 0.0001
 lambda = 0.0003 -- very slowly improving -- 77.78 by epoch 18
@@ -80,7 +82,7 @@ sparse attention
 
 eta = 0.0003
 lambda = 0.0001  is overfitting now -- 79.67 by epoch 27 [starting to overfit]
-[KILL]
+[KILLED]
 
 eta = 0.0003
 lambda = 0.0003 is slowly improving -- 78.53 by epoch 17
@@ -103,4 +105,5 @@ sparse attention, no jesus
 
 eta = 0.0003
 lambda = 0.0001 improving slowly -- 79.79 by epoch 39, still improving
+[KILLED]
 
