@@ -135,7 +135,7 @@ class RNN {
     sparse_attention_ = sparse_attention;
     use_separate_rnns_ = true; // false;
     connect_rnns_ = true; // false;
-    use_lstms_ = true; //false;
+    use_lstms_ = false; //true; //false;
     use_bidirectional_rnns_ = false;
     use_linear_layer_after_rnn_ = false; //true;
     use_average_layer_ = false; //true;
