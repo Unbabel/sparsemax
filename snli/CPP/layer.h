@@ -440,15 +440,19 @@ template<typename Real> class Layer {
   virtual void RunBackward() = 0;
   //virtual void UpdateParameters(double learning_rate) = 0;
 
-  void ApplyDropout(int k, double dropout_probability_) {
+  void ApplyDropout(int k, double dropout_probability) {
     for (int i = 0; i < outputs_[k].rows(); ++i) {
       for (int j = 0; j < outputs_[k].cols(); ++j) {
         double value =  static_cast<double>(rand()) / RAND_MAX;
-        if (value < dropout_probability_) {
+        if (value < dropout_probability) {
           outputs_[k](i,j) = 0.0;
         }
       }
     }
+  }
+
+  void ScaleOutput(int k, double scale_factor) {
+    outputs_[k] *= scale_factor;
   }
 
   int GetNumInputs() const { return inputs_.size(); }
@@ -2254,19 +2258,27 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
   Matrix<Real> lu_;
 };
 
+struct AttentionTypes {
+  enum {
+    LOGISTIC = 0,
+    SOFTMAX,
+    SPARSEMAX
+  };
+};
+
 template<typename Real> class AttentionLayer : public Layer<Real> {
  public:
   AttentionLayer() {}
   AttentionLayer(int input_size,
                  int control_size,
                  int hidden_size,
-                 bool use_sparsemax) {
+                 int attention_type) {
     this->name_ = "Attention";
     activation_function_ = ActivationFunctions::TANH;
     input_size_ = input_size;
     control_size_ = control_size;
     hidden_size_ = hidden_size;
-    use_sparsemax_ = use_sparsemax;
+    attention_type_ = attention_type;
   }
   virtual ~AttentionLayer() {}
 
@@ -2354,18 +2366,19 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
 #endif
 
     Vector<Real> v = z_.transpose() * wzp_;
-    if (use_sparsemax_) {
+    if (attention_type_ == AttentionTypes::SPARSEMAX) {
       Real tau;
       Real r = 1.0;
       //std::cout << "v=" << v << std::endl;
       ProjectOntoSimplex(v, r, &p_, &tau);
       //std::cout << "p=" << p_ << std::endl;
       //std::cout << "tau=" << tau << std::endl;
-    } else {
+    } else if (attention_type_ == AttentionTypes::SOFTMAX) {
       Real logsum = LogSumExp(v);
       p_ = (v.array() - logsum).exp();
+    } else { // LOGISTIC.
+      EvaluateActivation(ActivationFunctions::LOGISTIC, v, &p_);
     }
-
 #if 0
     std::cout << "p_att=" << p_ << std::endl;
 #endif
@@ -2386,7 +2399,7 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     dp_.noalias() = X.transpose() * this->GetOutputDerivative();
 
     Vector<Real> Jdp;
-    if (use_sparsemax_) {
+    if (attention_type_ == AttentionTypes::SPARSEMAX) {
       // Compute Jparsemax * dp_.
       // Let s = supp(p_) and k = sum(s).
       // Jsparsemax = diag(s) - s*s.transpose() / k.
@@ -2413,7 +2426,7 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
           Jdp[i] = dp_[i] - val;
         }
       }
-    } else {
+    } else if (attention_type_ == AttentionTypes::SOFTMAX) {
       // Compute Jsoftmax * dp_.
       // Jsoftmax = diag(p_) - p_*p_.transpose().
       // Jsoftmax * dp_ = p_.array() * dp_.array() - p_* (p_.transpose() * dp_).
@@ -2421,6 +2434,9 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
       // where val = p_.transpose() * dp_.
       float val = p_.transpose() * dp_;
       Jdp = p_.array() * (dp_.array() - val);
+    } else { // // LOGISTIC.
+      DerivateActivation(ActivationFunctions::LOGISTIC, p_, &Jdp);
+      Jdp = Jdp.array() * dp_.array();
     }
     dz_ = wzp_ * Jdp.transpose();
 
@@ -2453,7 +2469,7 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
   int hidden_size_;
   int input_size_;
   int control_size_;
-  bool use_sparsemax_;
+  int attention_type_;
 
   Matrix<Real> Wxz_;
   Matrix<Real> Wyz_;

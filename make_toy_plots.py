@@ -71,9 +71,9 @@ for s, setting in enumerate(settings):
         ax.plot(np.array(all_lengths), all_results['softmax'][k, :, 0], 'r--')
         ax.plot(np.array(all_lengths), all_results['sparsemax'][k, :, 0], 'b-.')
         if s == 0:
-            ax.set_title('$L=%d$, uniform label proportions' % num_classes, {'fontname':'cmr10'})
+            ax.set_title('$K=%d$, uniform label proportions' % num_classes, {'fontname':'cmr10'})
         else:
-            ax.set_title('$L=%d$, random label proportions' % num_classes, {'fontname':'cmr10'})
+            ax.set_title('$K=%d$, random label proportions' % num_classes, {'fontname':'cmr10'})
         ax.set_xlim([200, 2000])
         ax.grid(False)
 

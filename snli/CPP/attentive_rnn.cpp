@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
   std::string test_file = argv[4];
   std::string word_vector_file = argv[5];
   bool use_attention = static_cast<bool>(atoi(argv[6]));
-  bool sparse_attention = static_cast<bool>(atoi(argv[7]));
+  int attention_type = atoi(argv[7]);
   int num_hidden_units = atoi(argv[8]);
   int warm_start_on_epoch = atoi(argv[9]);
   int num_epochs = atoi(argv[10]);
@@ -131,10 +131,12 @@ int main(int argc, char** argv) {
   int word_cutoff = 1;
 
   if (use_attention) {
-    if (sparse_attention) {
+    if (attention_type == AttentionTypes::SPARSEMAX) {
       std::cout << "Using sparse-max attention." << std::endl;
-    } else {
+    } else if (attention_type == AttentionTypes::SOFTMAX) {
       std::cout << "Using soft-max attention." << std::endl;
+    } else { // LOGISTIC.
+      std::cout << "Using logistic attention." << std::endl;
     }
   } else {
     std::cout << "Not using attention." << std::endl;
@@ -184,7 +186,7 @@ int main(int argc, char** argv) {
   //BiRNN_GRU
   RNN rnn(&dictionary, embedding_dimension,
           num_hidden_units, dictionary.GetNumLabels(),
-          use_attention, sparse_attention);
+          use_attention, attention_type);
   //rnn.SetFixedEmbeddings(fixed_embeddings, word_ids);
   rnn.SetModelPrefix(model_prefix);
   rnn.SetFixedEmbeddings(fixed_embeddings);

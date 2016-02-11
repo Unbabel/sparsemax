@@ -128,11 +128,11 @@ class RNN {
       int hidden_size,
       int output_size,
       bool use_attention,
-      bool sparse_attention) : dictionary_(dictionary) {
+      int attention_type) : dictionary_(dictionary) {
     write_attention_probabilities_ = false;
     use_ADAM_ = true; //false; //true;
     use_attention_ = use_attention;
-    sparse_attention_ = sparse_attention;
+    attention_type_ = attention_type;
     use_separate_rnns_ = true; // false;
     connect_rnns_ = true; // false;
     use_lstms_ = false; //true; //false;
@@ -141,6 +141,7 @@ class RNN {
     use_average_layer_ = false; //true;
     apply_dropout_ = true; // false;
     dropout_probability_ = 0.1;
+    test_ = false;
     input_size_ = hidden_size; // Size of the projected embedded words.
     hidden_size_ = hidden_size;
     output_size_ = output_size;
@@ -211,7 +212,7 @@ class RNN {
     if (use_attention_) {
       attention_layer_ = new FloatAttentionLayer(state_size, state_size,
                                                  hidden_size_,
-                                                 sparse_attention_);
+                                                 attention_type_);
       network_.AddLayer(attention_layer_);
     }
 
@@ -503,10 +504,12 @@ class RNN {
     }
 
     write_attention_probabilities_ = true;
-    if (sparse_attention_) {
+    if (attention_type_ == AttentionTypes::SPARSEMAX) {
       os_attention_.open("sparse_attention.txt", std::ifstream::out);
-    } else {
+    } else if (attention_type_ == AttentionTypes::SOFTMAX) {
       os_attention_.open("soft_attention.txt", std::ifstream::out);
+    } else { // LOGISTIC.
+      os_attention_.open("logistic_attention.txt", std::ifstream::out);
     }
 
     double accuracy_dev = 0.0;
@@ -557,10 +560,12 @@ class RNN {
     gettimeofday(&start, NULL);
 
     write_attention_probabilities_ = true;
-    if (sparse_attention_) {
+    if (attention_type_ == AttentionTypes::SPARSEMAX) {
       os_attention_.open("sparse_attention_test.txt", std::ifstream::out);
-    } else {
+    } else if (attention_type_ == AttentionTypes::SOFTMAX) {
       os_attention_.open("soft_attention_test.txt", std::ifstream::out);
+    } else { // LOGISTIC.
+      os_attention_.open("logistic_attention_test.txt", std::ifstream::out);
     }
 
     double accuracy_dev = 0.0;
@@ -601,8 +606,10 @@ class RNN {
   void Run(const std::vector<Input> &input_sequence,
            int *predicted_label) {
     bool apply_dropout = apply_dropout_;
+    test_ = true;
     apply_dropout_ = false;
     RunForwardPass(input_sequence);
+    test_ = false;
     apply_dropout_ = apply_dropout;
     int prediction;
     FloatVector p = output_layer_->GetOutput(0);
@@ -653,9 +660,18 @@ class RNN {
       layers[k]->RunForward();
       if (apply_dropout_) {
         if (layers[k] == lookup_layer_) {
-          lookup_layer_->ApplyDropout(0, dropout_probability_);
+          if (test_) {
+            lookup_layer_->ScaleOutput(0, 1.0 - dropout_probability_);
+          } else {
+            lookup_layer_->ApplyDropout(0, dropout_probability_);
+          }
         } else if (layers[k] == hypothesis_rnn_layer_) {
-          hypothesis_selector_layer_->ApplyDropout(0, dropout_probability_);
+          if (test_) {
+            hypothesis_selector_layer_->ScaleOutput(0,
+                                                    1.0 - dropout_probability_);
+          } else {
+            hypothesis_selector_layer_->ApplyDropout(0, dropout_probability_);
+          }
         }
       }
     }
@@ -737,7 +753,7 @@ class RNN {
   int hidden_size_;
   int output_size_;
   bool use_attention_;
-  bool sparse_attention_;
+  int attention_type_;
   bool use_separate_rnns_;
   bool connect_rnns_;
   bool use_lstms_;
@@ -748,6 +764,7 @@ class RNN {
   double dropout_probability_;
   bool use_ADAM_;
   bool write_attention_probabilities_;
+  bool test_;
   std::string model_prefix_;
   std::ofstream os_attention_;
   //FloatMatrix x_;
