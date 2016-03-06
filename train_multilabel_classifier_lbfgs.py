@@ -63,9 +63,9 @@ def evaluate_and_compute_gradient(weights_flattened, *args):
         if loss_function == 'sparsemax':
             probs, tau, _ =  project_onto_simplex(scores)
             predicted_labels = compute_support(probs)
-            loss_t = \
-                -scores.dot(y) + .5*(scores**2 - tau**2).dot(predicted_labels) + .5 * sum(y**y)
-#                -scores.dot(y) + .5*(scores**2 - tau**2).dot(predicted_labels) + .5/sum(gold_labels)
+            loss_t = -scores.dot(y) + \
+                     .5*(scores**2 - tau**2).dot(predicted_labels) + \
+                     .5 * sum(y**2)
             loss += loss_t
             assert loss_t > -1e-9 #, pdb.set_trace()
             delta = -y + probs
@@ -375,21 +375,15 @@ def print_accuracies_means_and_deviations(hyperparameter_name, hyperparameter_va
 
 loss_function = sys.argv[1] #'softmax' #'logistic' # 'sparsemax'
 num_epochs = int(sys.argv[2]) #20
-#learning_rate = float(sys.argv[3]) #0.001
 regularization_constant = float(sys.argv[3])
 
-#sparsemax_scales = [1., 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2., 2.5, 3., 3.5, 4., 4.5, 5., 5.5, 6., 6.5, 7., 7.5, 8., 8.5, 9., 9.5, 10., 10.5, 11.0, 11.5, 12., 12.5, 13., 13.5, 14., 14.5, 15., 15.5, 16, 16.5, 17., 17.5, 18, 18.5, 19, 19.5, 20.]
-#softmax_thresholds = [.005, .006, .007, .008, .009, .01, .02, .03, .04, .05, .06, .07, .08, .09, .1, .15, .20, .25, .30, .35, .40, .45, .50]
-#logistic_thresholds = [.05, .06, .07, .08, .09, .1, .2, .3, .4, .5, .6, .7]
-
 filepath_train = sys.argv[4]
-filepath_dev = sys.argv[5]
-filepath_test = sys.argv[6]
+filepath_test = sys.argv[5]
 add_bias = True # False
-normalize = bool(int(sys.argv[7]))
-has_label_probabilities = True #False
+normalize = bool(int(sys.argv[6]))
+has_label_probabilities = False #True
 
-num_jackknife_partitions = int(sys.argv[8]) # 1 means no jackknifing.
+num_jackknife_partitions = int(sys.argv[7]) # 1 means no jackknifing.
 
 X_train, Y_train, num_features = \
     read_multilabel_dataset(filepath_train, \
@@ -462,9 +456,9 @@ if num_jackknife_partitions <= 1:
     if d['warnflag'] != 0:
         print 'Not converged', d
 
-    print 'Running on the dev set...'
+    print 'Running on the test set...'
     tic = time.time()
-    classify_dataset(filepath_dev, weights, loss_function, \
+    classify_dataset(filepath_test, weights, loss_function, \
                      hyperparameter_name, \
                      hyperparameter_values, \
                      has_label_probabilities=has_label_probabilities, \
@@ -474,15 +468,6 @@ if num_jackknife_partitions <= 1:
                      x_std=x_std)
     elapsed_time = time.time() - tic
     print 'Time to test: %f' % elapsed_time
-
-    #print 'Running on the test set...'
-    #tic = time.time()
-    #classify_dataset(filepath_test, weights, loss_function, \
-    #                 hyperparameter_name, \
-    #                 hyperparameter_values)
-    #elapsed_time = time.time() - tic
-    #print 'Time to test: %f' % elapsed_time
-
 
 else:
     num_examples = len(X_train)
