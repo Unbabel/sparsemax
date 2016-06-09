@@ -7,6 +7,8 @@
 #include <assert.h>
 #include "attentive_rnn.h"
 
+typedef AttentiveRNN<double> DoubleAttentiveRNN;
+
 const int kMaxAffixSize = 4;
 
 void LoadWordVectors(const std::string &word_vector_file,
@@ -152,7 +154,7 @@ int main(int argc, char** argv) {
   int embedding_dimension = word_vectors.begin()->second.size();
   std::cout << "Original embedding dimension: " << embedding_dimension
             << std::endl;
-  FloatMatrix fixed_embeddings = FloatMatrix::Zero(embedding_dimension,
+  DoubleMatrix fixed_embeddings = DoubleMatrix::Zero(embedding_dimension,
                                                    num_fixed_embeddings);
   //std::vector<int> word_ids;
   for (auto it = word_vectors.begin(); it != word_vectors.end(); ++it) {
@@ -183,10 +185,9 @@ int main(int argc, char** argv) {
   std::cout << "Number of words: " << dictionary.GetNumWords() << std::endl;
   std::cout << "Number of labels: " <<  dictionary.GetNumLabels() << std::endl;
 
-  //BiRNN_GRU
-  RNN rnn(&dictionary, embedding_dimension,
-          num_hidden_units, dictionary.GetNumLabels(),
-          use_attention, attention_type);
+  DoubleAttentiveRNN rnn(&dictionary, embedding_dimension,
+                         num_hidden_units, dictionary.GetNumLabels(),
+                         use_attention, attention_type);
   //rnn.SetFixedEmbeddings(fixed_embeddings, word_ids);
   rnn.SetModelPrefix(model_prefix);
   rnn.SetFixedEmbeddings(fixed_embeddings);

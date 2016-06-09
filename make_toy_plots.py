@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pdb
 
-font = {'family' : 'cmr10'}
+font = {'family' : 'cmr10', 'size': 10}
 plt.rc('font', **font)
 
 #all_num_classes = [10, 20, 30, 40, 50, 60, 70, 80]
@@ -78,7 +78,7 @@ for s, setting in enumerate(settings):
         ax.grid(False)
 
         if s == 0 and k == 1:
-            leg = ax.legend(('JSD (softmax)', 'JSD (sparsemax)', 'MSE (softmax)', 'MSE (sparsemax)'), 'upper right', shadow=True)
+            leg = ax.legend(('JSD (softmax)', 'JSD (sparsemax)', 'MSE (softmax)', 'MSE (sparsemax)'), 'upper right', shadow=False)
         if s == 1:
             ax.set_xlabel('Document Length', {'fontname':'cmr10'})
 

@@ -8,6 +8,9 @@ filepath = sys.argv[1]
 f = open(filepath)
 f_out = open('tmp.html', 'w')
 
+num_words = 0
+num_selected_words = 0
+
 f_out.write('<html>')
 for line in f:
     line = line.rstrip('\n')
@@ -32,12 +35,17 @@ for line in f:
 
     f_out.write('<p>[%s|%s] ' % (label, predicted_label))
     for word, score in zip(premise_words, attention_scores):
+        num_words += 1
         if score > threshold:
+            num_selected_words += 1
             f_out.write('<span title="%s"><b>%s</b></span> ' % (str(score), word))
         else:
             f_out.write('<span title="%s">%s</span> ' % (str(score), word))
     f_out.write('[%s]</p>' % hypothesis)
 
 f_out.write('</html>')
-f_out.close()    
+f_out.close()
 f.close()
+
+print >> sys.stderr, 'Selected %d out of %d words (%f%%).' % \
+    (num_selected_words, num_words, 100. * num_selected_words / num_words)
