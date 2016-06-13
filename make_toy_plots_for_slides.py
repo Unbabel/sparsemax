@@ -9,7 +9,7 @@ font = {'size': 14}
 plt.rc('font', **font)
 
 #all_num_classes = [10, 20, 30, 40, 50, 60, 70, 80]
-all_num_classes = [10, 50]
+all_num_classes = [50] #[10, 50]
 #all_lengths = [50, 100, 500, 1000, 1500, 2000, 2500, 3000]
 #all_lengths = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000]
 all_lengths = [200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000]
@@ -19,7 +19,7 @@ all_results['softmax'] = np.zeros((len(all_num_classes), len(all_lengths), 4))
 all_results['sparsemax'] = np.zeros((len(all_num_classes), len(all_lengths), 4))
 settings = ['-proportions']
 
-fig, axs = plt.subplots(nrows=1, ncols=2, sharex=True)
+fig, axs = plt.subplots(nrows=1, ncols=1, sharex=True)
 
 for s, setting in enumerate(settings):
     for algo in ['softmax', 'sparsemax']:
@@ -66,17 +66,31 @@ for s, setting in enumerate(settings):
         #plt.show()
 
         #ax = axs[s,k]
-        ax = axs[k]
-        ax.errorbar(np.array(all_lengths), all_results['softmax'][k, :, 2], yerr=all_results['softmax'][k, :, 3], fmt='o-', color='r')
-        ax.errorbar(np.array(all_lengths), all_results['sparsemax'][k, :, 2], yerr=all_results['sparsemax'][k, :, 3], fmt='s-', color='b')
-        ax.plot(np.array(all_lengths), all_results['softmax'][k, :, 0], 'r--')
-        ax.plot(np.array(all_lengths), all_results['sparsemax'][k, :, 0], 'b-.')
-        ax.set_title('$K=%d$' % num_classes)
+        ax = axs #[k]
+        (_, caps1, _) = ax.errorbar(np.array(all_lengths), all_results['softmax'][k, :, 2], yerr=all_results['softmax'][k, :, 3], fmt='o-', color='b', linewidth=3.0, markersize=8, capsize=10, markeredgecolor='b')
+        (_, caps2, _) = ax.errorbar(np.array(all_lengths), all_results['sparsemax'][k, :, 2], yerr=all_results['sparsemax'][k, :, 3], fmt='s-', color='r', linewidth=3.0, markersize=8, capsize=10, markeredgecolor='r')
+
+        for cap in caps1:
+            cap.set_color('blue')
+            cap.set_markeredgewidth(3)
+        for cap in caps2:
+            cap.set_color('red')
+            cap.set_markeredgewidth(3)
+
+        #ax.plot(np.array(all_lengths), all_results['softmax'][k, :, 0], 'r--')
+        #ax.plot(np.array(all_lengths), all_results['sparsemax'][k, :, 0], 'b-.')
+        #ax.set_title('$K=%d$' % num_classes)
+        ax.set_title('JS Divergence btwn Predicted and True Label Proportions')
         ax.set_xlim([200, 2000])
         ax.grid(False)
 
-        if k == 1:
-            leg = ax.legend(('JSD (softmax)', 'JSD (sparsemax)', 'MSE (softmax)', 'MSE (sparsemax)'), 'upper right', shadow=False)
-        ax.set_xlabel('Document Length')
+        if k == len(all_num_classes)-1:
+            leg = ax.legend(('JSD ($L_\mathbf{softmax}$)', 'JSD ($L_\mathbf{sparsemax}$)'), \
+                             #'MSE (softmax)', 'MSE (sparsemax)'),
+                             'upper right', shadow=False, fontsize=20)
+        ax.set_xlabel('Document Length', fontsize=16)
+        plt.setp(plt.gca().get_xticklabels(), fontsize=16)        
+        plt.setp(plt.gca().get_yticklabels(), fontsize=16)        
+
 
 plt.show()
