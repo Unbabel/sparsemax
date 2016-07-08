@@ -469,7 +469,7 @@ template<typename Real> class AttentiveRNN : public NeuralNetwork<Real> {
            int *predicted_label) {
     bool apply_dropout = apply_dropout_;
     test_ = true;
-    apply_dropout_ = false; // TODO: Remove this line to have correct dropout at test time.
+    //apply_dropout_ = false; // TODO: Remove this line to have correct dropout at test time.
     RunForwardPass(input_sequence);
     test_ = false;
     apply_dropout_ = apply_dropout;
